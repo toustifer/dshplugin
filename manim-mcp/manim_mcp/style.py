@@ -81,6 +81,24 @@ def _literal(value: str | None) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+def python_literal(value) -> str:
+    """A **Python** source literal for `value`.
+
+    `json.dumps` is the tempting shortcut and is wrong for three values: it emits
+    `null`, `true`, and `false`, which Python parses as ordinary identifiers and
+    only rejects with `NameError` when Manim imports the generated file. That is
+    a failure an `ast.parse` assertion cannot see, so every template must route
+    its literals through here.
+    """
+    if value is None:
+        return "None"
+    if value is True:
+        return "True"
+    if value is False:
+        return "False"
+    return json.dumps(value, ensure_ascii=False)
+
+
 def preamble(cjk_font: str | None) -> str:
     """Header source that every generated scene starts with.
 

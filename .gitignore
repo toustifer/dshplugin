@@ -11,3 +11,4 @@ __pycache__/
 
 # 探针/临时
 .probe/
+.verify/

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Mapping, Sequence
 
-from ..style import preamble
+from ..style import preamble, python_literal
 from . import SceneSpecError
 
 NAME = "diagram"
@@ -43,6 +43,17 @@ EDGE_SPECS = [
 ]
 
 
+def label_width(text):
+    """Box width sized by rendered text, not by character count.
+
+    A CJK glyph is roughly twice as wide as a Latin one at the same nominal size,
+    so a flat per-character estimate leaves Chinese labels touching the border.
+    """
+    wide = sum(1 for character in text if ord(character) > 0x2E80)
+    narrow = len(text) - wide
+    return max(2.6, 0.28 * narrow + 0.52 * wide + 0.95)
+
+
 class DiagramScene(Scene):
     def construct(self):
         boxes = VGroup()
@@ -50,7 +61,7 @@ class DiagramScene(Scene):
         for position, (node_id, label, kind) in enumerate(NODE_SPECS):
             box = RoundedRectangle(
                 corner_radius=0.14,
-                width=max(2.6, 0.34 * len(label) + 0.9),
+                width=label_width(label),
                 height=0.95,
                 color=KIND_COLORS[kind],
                 fill_opacity=0.14,
@@ -76,12 +87,41 @@ class DiagramScene(Scene):
         arrows = VGroup()
         labels = VGroup()
         for source, target, edge_label in EDGE_SPECS:
-            start_box = boxes[index_of[source]][0]
-            end_box = boxes[index_of[target]][0]
+            source_index = index_of[source]
+            target_index = index_of[target]
+            start_box = boxes[source_index][0]
+            end_box = boxes[target_index][0]
+
+            # Reading order runs top-to-bottom (or left-to-right). A forward edge
+            # is a straight arrow anchored on the facing box edges, so it cannot
+            # touch the boxes it passes. A back edge — the loop in a cyclic
+            # process — would be drawn straight through every box between the two
+            # nodes, so it bows out around the side of the column instead.
+            backwards = target_index <= source_index
+            if LAYOUT == "horizontal":
+                if backwards:
+                    start = start_box.get_top() + UP * 0.55
+                    end = end_box.get_top() + UP * 0.55
+                    arc = 1.6
+                else:
+                    start = start_box.get_right()
+                    end = end_box.get_left()
+                    arc = 0.0
+            else:
+                if backwards:
+                    start = start_box.get_left() + LEFT * 0.6
+                    end = end_box.get_left() + LEFT * 0.6
+                    arc = -1.6
+                else:
+                    start = start_box.get_bottom()
+                    end = end_box.get_top()
+                    arc = 0.0
+
             arrow = Arrow(
-                start_box.get_center(),
-                end_box.get_center(),
-                buff=0.62,
+                start,
+                end,
+                path_arc=arc,
+                buff=0.14,
                 color=C_GREY,
                 stroke_width=3,
                 max_tip_length_to_length_ratio=0.12,
@@ -89,7 +129,11 @@ class DiagramScene(Scene):
             arrows.add(arrow)
             if edge_label:
                 tag = cn(edge_label, NOTE_SIZE - 6, C_HIGHLIGHT)
-                tag.move_to(arrow.get_center() + RIGHT * 0.42)
+                if backwards:
+                    offset = LEFT * 0.95 if LAYOUT == "vertical" else UP * 0.5
+                else:
+                    offset = RIGHT * 0.45 if LAYOUT == "vertical" else UP * 0.32
+                tag.move_to(arrow.get_center() + offset)
                 labels.add(tag)
 
         self.play(
@@ -111,7 +155,13 @@ class DiagramScene(Scene):
 
 
 def _literal(value) -> str:
-    return json.dumps(value, ensure_ascii=False)
+    """Route every literal through the shared helper.
+
+    `json.dumps` was used here first and emitted `null` for an unlabelled edge
+    (the label is legitimately absent), which parses cleanly and then dies with
+    `NameError: name 'null' is not defined` the moment Manim imports the file.
+    """
+    return python_literal(value)
 
 
 def _nodes(value) -> list[tuple[str, str, str]]:

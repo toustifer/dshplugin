@@ -6403,6 +6403,13 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 | 5 | Task 6 | `hint_for` 只把第 3 个参数（stderr blob）当匹配范围，`latex` 出现在异常 message 里时漏判（`test_hint_for_missing_latex_binary` 直接 TypeError） | 规则改读 `message + blob` 合并后的 haystack |
 | 6 | Task 10 | `graph.py` 用 `json.dumps(list(x_range))` 生成区间字面量，浮点化后输出 `[-4.0, 4.0, 1.0]`，与 `PARAMS` 文档及 `test_default_x_range_is_used_when_absent` / `test_y_range_default_is_emitted` / `test_custom_x_range_is_emitted` 要求的 `[-4, 4, 1]` 不符（3 个测试红） | 新增 `_number` / `_range_literal`，整数值端点去掉 `.0`；`X_RANGE`/`Y_RANGE`/`AREA_RANGE` 统一改用 `_range_literal`（数值校验仍走 float，只修代码生成） |
 | 7 | Task 11 | `test_node_kind_defaults_to_process` 断言 `'("x", "process")' in code`，但按计划的模板输出的是 `(id, label, kind)` 三元组 `("a", "x", "process")`，左括号在 id 之前，该子串永远无法匹配（测试自身写错，非实现错） | 断言改为完整三元组 `'("a", "x", "process")'`，同时钉死 id、label 与默认 kind，比原断言更强 |
+| 8 | Task 11 | **只有真机渲染能发现的缺陷**：`diagram.py` 的 `_literal` 用 `json.dumps`，无边标签的边生成 `("in", "pivot", null)`。`ast.parse` **通过**（`null` 是合法标识符），但 Manim import 时 `NameError: name 'null' is not defined` | `style.py` 新增 `python_literal()`（正确处理 `None`/`True`/`False`），`diagram._literal` 委托给它；新增 `tests/test_scene_codegen.py` 对**全部四个模板**断言 AST 中不出现 `null`/`true`/`false` 这三个名字 |
+| 9 | Task 11 | **画面目视验收发现的缺陷**：边以「方框中心 → 方框中心」直连，反向边（循环）直穿中间所有方框、标签压在节点上——框图反而更难读 | 正向边锚在相向的方框边缘（不穿框）；反向边沿列外侧弓形绕行（`path_arc`），标签移到列外 |
+| 10 | Task 11 | **画面目视验收发现的缺陷**：方框宽度按 `0.34 * len(label)` 估算，这是拉丁字符的系数；中文标签（如「递归处理两侧」）贴到框边 | 模板内新增 `label_width()`，CJK 字符按约 1.9 倍字宽计（`ord(ch) > 0x2E80` 判定） |
+
+**新增的验收工具**：`tests/manual/render_templates.py` —— 用真机 Manim 把四个模板（外加参数滑动的 graph）各渲染一次。第 8/9/10 条缺陷全是它发现的，而单元测试**全都漏掉了**。**改动 `manim_mcp/scenes/` 之后必须跑它。**
+
+> 第 8 条的教训值得单独记一笔：`ast.parse` 通过并不代表代码能 import。任何把值编译成源码的地方（`scenes/`）都不能只用 `ast.parse` 断言，要么用 `python_literal()` 这类共享助手，要么真跑一次。
 
 以下偏离是**预先设计**的，不属缺陷：Task 9 先建 `graph/diagram/compare` 三个抛 `SceneSpecError` 的占位模块（Task 10–12 替换）；Task 18 先建 `tools/selftest.py` 的 `return 0` 版（Task 19 替换）。
 
