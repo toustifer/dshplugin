@@ -66,11 +66,20 @@ window.__ModuleLoader__.load({
 		const RENDER_ROOT = "D:/myprogram/dshplugin/renders";
 		const INDEX_PATH = `${RENDER_ROOT}/index.json`;
 
-		/** Route one absolute Host path through DSH's authenticated file endpoint. */
+		/**
+		 * Route one absolute Host path through DSH's authenticated file endpoint.
+		 *
+		 * The path is sent WITHOUT a leading slash. `/api/file` resolves it with
+		 * `node:path.resolve`, and on Windows `resolve(cwd, "/D:/x")` returns
+		 * `C:\D:\x` — the leading slash makes Node treat the drive letter as an
+		 * ordinary path segment and glue the whole thing onto the cwd's drive, so
+		 * the file is never found and the endpoint answers 404. `D:/x` resolves to
+		 * `D:\x` correctly. (A 401 from this endpoint means auth; a 404 means the
+		 * path form or a genuinely absent file.)
+		 */
 		function fileUrl(absolutePath) {
 			const slashed = String(absolutePath).replace(/\\/g, "/");
-			const rooted = slashed.startsWith("/") ? slashed : `/${slashed}`;
-			return `/api/file?path=${encodeURIComponent(rooted)}`;
+			return `/api/file?path=${encodeURIComponent(slashed)}`;
 		}
 
 		function indexUrl() {

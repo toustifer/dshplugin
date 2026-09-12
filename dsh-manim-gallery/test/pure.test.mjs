@@ -22,20 +22,25 @@ test("the render root is a slash path the Host can serve", () => {
 	assert.equal(INDEX_PATH, `${RENDER_ROOT}/index.json`);
 });
 
-test("fileUrl routes an absolute path through the authenticated file endpoint", () => {
+test("fileUrl sends the form node:path.resolve actually understands", () => {
+	// `/api/file` resolves `path` with node:path.resolve, and on Windows
+	// `resolve(cwd, "/D:/x")` yields "C:\\D:\\x" — a leading slash makes Node treat
+	// the drive letter as an ordinary segment and glue it onto the cwd's drive.
+	// Measured: "/D:/a" -> C:\D:\a (404); "D:/a" -> D:\a (found).
 	const url = fileUrl("D:\\myprogram\\dshplugin\\renders\\a\\out\\S.gif");
 	assert.equal(
 		url,
-		"/api/file?path=" + encodeURIComponent("/D:/myprogram/dshplugin/renders/a/out/S.gif")
+		"/api/file?path=" + encodeURIComponent("D:/myprogram/dshplugin/renders/a/out/S.gif")
 	);
 });
 
-test("fileUrl accepts a path that is already in slash form", () => {
-	assert.equal(fileUrl("/D:/r/a.gif"), "/api/file?path=" + encodeURIComponent("/D:/r/a.gif"));
+test("fileUrl never emits a leading slash on the path parameter", () => {
+	assert.ok(!fileUrl("D:\\r\\a.gif").includes(encodeURIComponent("/D:")));
+	assert.ok(!fileUrl("D:\\r\\a.gif").includes("%2FD"));
 });
 
-test("fileUrl does not double the leading slash", () => {
-	assert.ok(!fileUrl("/D:/a.gif").includes(encodeURIComponent("//D:")));
+test("fileUrl normalises backslashes", () => {
+	assert.equal(fileUrl("D:\\r\\a.gif"), fileUrl("D:/r/a.gif"));
 });
 
 test("fileUrl escapes characters that would break the query string", () => {
