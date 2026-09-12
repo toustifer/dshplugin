@@ -1,0 +1,11 @@
+Manim Community v0.20.1
+
+[09/12/26 15:30:12] INFO     Writing tex file                               tex_file_writing.py:243
+Traceback (most recent call last):
+  File "D:\myprogram\dshplugin\renders\20260912-153012-a1b2\scene.py", line 6, in construct
+    formula = MathTex(r"\undefinedmacro{x}")
+  File "D:\ProgramData\anaconda3\Lib\site-packages\manim\mobject\svg\tex_mobject.py", line 200, in __init__
+    self.tex_strings = self._break_up_tex_strings(tex_strings)
+  File "D:\ProgramData\anaconda3\Lib\site-packages\manim\utils\tex_file_writing.py", line 280, in print_all_tex_errors
+    raise RuntimeError(
+RuntimeError: latex failed but did not produce a log file. Check your LaTeX installation.

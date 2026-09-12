@@ -1,0 +1,10 @@
+Manim Community v0.20.1
+
+<frozen runpy>:128: RuntimeWarning: 'manim.__main__' found in sys.modules after import of package 'manim', but prior to execution of 'manim.__main__'; this may result in unpredictable behaviour
+Traceback (most recent call last):
+  File "D:\myprogram\dshplugin\renders\20260912-153012-a1b2\scene.py", line 12, in <module>
+    Smoke().render()
+  File "D:\myprogram\dshplugin\renders\20260912-153012-a1b2\scene.py", line 9, in construct
+    circle = Circle(radius=1)
+             ^^^^^^^^^^^^^^^^
+NameError: name 'Circle' is not defined
