@@ -9,23 +9,32 @@ test("the module registers itself under the package name", () => {
 	assert.equal(typeof entry.factory, "function");
 });
 
-test("the plugin declares the slots service as its only hard dependency", () => {
+test("the plugin declares the services it reaches as context properties", () => {
 	const { plugin } = loadClient();
-	assert.deepEqual(plugin.inject, ["slots"]);
+	// `sidebarRight` and `layout` are reached as `ctx.sidebarRight` / `ctx.layout`,
+	// which is only legal for a DECLARED dependency. The shipped plugins do the same
+	// (`dsh-client-ui-sidebar-files` injects `sidebarRightTabs` and then uses
+	// `ctx.sidebarRightTabs`); probing with `ctx.get` crosses a scope boundary and
+	// silently yields undefined — which is how the first version lost the button.
+	assert.deepEqual(plugin.inject, ["slots", "sidebarRight", "layout"]);
 	assert.equal(typeof plugin.apply, "function");
 });
 
-test("apply registers a global panel icon and a matching main panel", () => {
+test("apply registers the panel icon, the matching main panel, and a header entry", () => {
 	const { plugin } = loadClient();
 	const { ctx, registrations } = createCtx();
 	plugin.apply(ctx);
 
-	assert.equal(registrations.length, 2);
+	assert.equal(registrations.length, 3);
 
 	const icon = registrations.find((r) => r.options.name === "sidebar.panellist");
 	const page = registrations.find((r) => r.options.name === "main");
+	const header = registrations.find(
+		(r) => r.options.name === "conversation.session.header.utilities"
+	);
 	assert.ok(icon, "sidebar.panellist was not registered");
 	assert.ok(page, "main was not registered");
+	assert.ok(header, "the header entry was not registered");
 
 	// The sidebar resolves the button from list metadata, and that same id is what
 	// the layout dispatches into `main` — the two must be one string.
@@ -33,4 +42,10 @@ test("apply registers a global panel icon and a matching main panel", () => {
 	assert.equal(page.options.key, "manim-gallery");
 	assert.equal(icon.options.label, "动画库");
 	assert.ok(Number.isFinite(icon.options.order));
+
+	// The header entry is a second door to the same panel, so it carries the same id
+	// and a label the owner can project.
+	assert.equal(header.options.id, "manim-gallery");
+	assert.equal(header.options.label, "动画库");
+	assert.ok(Number.isFinite(header.options.order));
 });

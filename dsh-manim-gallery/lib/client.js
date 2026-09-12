@@ -22,6 +22,8 @@ window.__ModuleLoader__.load({
 .manim-gallery { display: flex; flex-direction: column; gap: 16px; padding: 20px 24px; height: 100%; overflow: auto; color: var(--dsw-alias-label-primary); }
 .manim-gallery__glyph { display: block; }
 .manim-gallery__glyph.is-active { color: var(--dsw-alias-label-primary); }
+.manim-gallery__header { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: none; border: none; border-radius: 6px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
+.manim-gallery__header:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .manim-gallery__toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .manim-gallery__search, .manim-gallery__select { background: var(--dsw-alias-bg-base); color: inherit; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 6px 10px; font: inherit; }
 .manim-gallery__search { min-width: 220px; }
@@ -576,26 +578,16 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * The panel component: React wiring only, plus the service lookup.
+		 * The panel component: React wiring only.
 		 *
-		 * The services are resolved on the FIRST RENDER rather than in `apply`.
-		 * `sidebarRight` is contributed by another client plugin, and `apply` order
-		 * between plugins is not something this package can rely on — resolving it
-		 * once at apply time would silently hide the button whenever that plugin
-		 * happened to apply later. The panel itself only mounts long after every
-		 * client plugin has applied, so render time is the honest moment to ask.
+		 * The services arrive already resolved. They are declared dependencies, so
+		 * Cordis guarantees they exist by the time `apply` runs — the earlier attempt
+		 * to look them up per render with `ctx.get` was not only unnecessary, it was
+		 * the bug: a sibling plugin's service is not visible that way.
 		 */
-		function makeGalleryPage(ctx) {
+		function makeGalleryPage(services) {
 			return function GalleryPage() {
 				const [state, setState] = react.useState(INITIAL_STATE);
-
-				const services = react.useMemo(
-					() => ({
-						layout: ctx.get("layout"),
-						sidebarRight: ctx.get("sidebarRight"),
-					}),
-					[]
-				);
 
 				react.useEffect(() => {
 					loadInto(setState);
@@ -615,8 +607,59 @@ window.__ModuleLoader__.load({
 			};
 		}
 
+		/** The header entry's cell: an icon-only button, like its neighbours. */
+		function makeHeaderButton(services) {
+			return function GalleryHeaderButton() {
+				return h(
+					"button",
+					{
+						className: "manim-gallery__header",
+						type: "button",
+						title: "动画库",
+						"aria-label": "动画库",
+						onClick: () => openGalleryPanel(services),
+					},
+					galleryIcon({ size: 16, active: false })
+				);
+			};
+		}
+
+		/** Reveal the gallery panel in the main column. */
+		function openGalleryPanel(services = {}) {
+			const { layout } = services;
+			if (layout === undefined || typeof layout.selectPanel !== "function") return false;
+			layout.selectPanel(PANEL_ID);
+			return true;
+		}
+
+		/**
+		 * A console probe, in the same spirit as `dsh-cross-session-modal`'s
+		 * `__DSH_XMODAL__`: when a panel misbehaves inside a browser this process
+		 * cannot see, "what did the plugin actually get?" has to be measurable rather
+		 * than guessed at.
+		 *
+		 * `__DSH_MANIM_GALLERY__.services()` answers whether the two declared
+		 * dependencies arrived; `.show()` and `.open(path)` drive the two doors.
+		 */
+		function publishProbe(services) {
+			globalThis.__DSH_MANIM_GALLERY__ = {
+				panelId: PANEL_ID,
+				renderRoot: RENDER_ROOT,
+				services: () => ({
+					layout: services.layout !== undefined,
+					sidebarRight: services.sidebarRight !== undefined,
+				}),
+				show: () => openGalleryPanel(services),
+				open: (absolutePath) => openInRightbar(absolutePath, services),
+				resourceAddress,
+			};
+		}
+
 		function apply(ctx) {
 			ensureStyle();
+			const services = { layout: ctx.layout, sidebarRight: ctx.sidebarRight };
+			publishProbe(services);
+
 			ctx.slots.inject("sidebar.panellist", () =>
 				ctx.slots.register(
 					{ name: "sidebar.panellist", id: PANEL_ID, order: 40, label: "动画库" },
@@ -624,12 +667,30 @@ window.__ModuleLoader__.load({
 				)
 			);
 			ctx.slots.inject("main", () =>
-				ctx.slots.register({ name: "main", key: PANEL_ID }, makeGalleryPage(ctx))
+				ctx.slots.register({ name: "main", key: PANEL_ID }, makeGalleryPage(services))
+			);
+			// A second door, in the Session header's right-aligned utilities beside the
+			// shipped ones: the sidebar entry is the discoverable one, and this is the
+			// one that stays in sight while reading an answer.
+			ctx.slots.inject("conversation.session.header.utilities", () =>
+				ctx.slots.register(
+					{
+						name: "conversation.session.header.utilities",
+						id: PANEL_ID,
+						order: 10,
+						label: "动画库",
+					},
+					makeHeaderButton(services)
+				)
 			);
 		}
 
 		exports.apply = apply;
-		exports.inject = ["slots"];
+		// `sidebarRight` and `layout` are DECLARED and then read as `ctx.sidebarRight` /
+		// `ctx.layout`. Reaching a sibling plugin's service with `ctx.get` crosses a
+		// scope boundary and yields undefined, which silently cost this plugin its
+		// right-sidebar button; declaring them is what the shipped plugins do too.
+		exports.inject = ["slots", "sidebarRight", "layout"];
 		exports.__internals = {
 			PANEL_ID,
 			RENDER_ROOT,
@@ -652,6 +713,8 @@ window.__ModuleLoader__.load({
 			copyToClipboard,
 			IconCell,
 			makeGalleryPage,
+			makeHeaderButton,
+			openGalleryPanel,
 			galleryActions,
 			resourceAddress,
 			previewablePath,

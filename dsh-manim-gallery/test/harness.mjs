@@ -57,36 +57,37 @@ export function createReactStub() {
 export function createCtx({ services = {}, onGet } = {}) {
 	const registrations = [];
 	const asked = [];
+	const ctx = {
+		slots: {
+			inject(key, callback) {
+				return callback();
+			},
+			register(options, component) {
+				registrations.push({ options, component });
+				return () => {};
+			},
+		},
+		/** A probe escape hatch; the sanctioned access is the property form below. */
+		get(name) {
+			asked.push(name);
+			if (onGet !== undefined) onGet(name);
+			return services[name] ?? ctx[name];
+		},
+		on() {
+			return () => {};
+		},
+	};
+	// A declared dependency arrives as a context property — that is how the shipped
+	// plugins reach `ctx.sidebarRightTabs` — so the harness mounts them that way too.
+	for (const [name, value] of Object.entries(services)) ctx[name] = value;
+
 	return {
 		registrations,
 		asked,
+		ctx,
 		/** The registration for one slot, matched by list `id` or keyed `key`. */
 		find(name) {
 			return registrations.find((entry) => entry.options.name === name);
-		},
-		ctx: {
-			slots: {
-				inject(key, callback) {
-					return callback();
-				},
-				register(options, component) {
-					registrations.push({ options, component });
-					return () => {};
-				},
-			},
-			/**
-			 * The plugin resolves optional Client services through `ctx.get`, so the
-			 * harness answers with whatever the test mounted — and records what was
-			 * asked for, which is how "it probes instead of demanding" is asserted.
-			 */
-			get(name) {
-				asked.push(name);
-				if (onGet !== undefined) onGet(name);
-				return services[name];
-			},
-			on() {
-				return () => {};
-			},
 		},
 	};
 }

@@ -151,7 +151,7 @@ test("copyToClipboard swallows a rejected write", async () => {
 	await plugin.__internals.copyToClipboard("x", clipboard);
 });
 
-const { openInRightbar, galleryActions } = plugin.__internals;
+const { openInRightbar, galleryActions, openGalleryPanel } = plugin.__internals;
 
 test("openInRightbar expands the column before handing over the address", () => {
 	const calls = [];
@@ -223,17 +223,24 @@ test("openInRightbar gives up loudly instead of leaving a dead button", () => {
 	assert.match(String(warned[0]), /右栏|右侧|sidebar/i);
 });
 
-test("the page resolves the services on render, not at apply time", () => {
-	// `sidebarRight` is contributed by another client plugin. Resolving it once in
-	// `apply` would hide the button whenever that plugin happens to apply later.
+test("apply reads the services off the declared context properties", () => {
+	// Not `ctx.get`: a service provided by a sibling plugin is only reliably visible
+	// as a context property, and only when it is declared in `inject`. Probing with
+	// `ctx.get` returned undefined and cost the panel its right-sidebar button.
 	const { ctx, registrations, asked } = createCtx({
-		services: { sidebarRight: { openResource() {} } },
+		services: {
+			layout: { openRightbar() {}, selectPanel() {} },
+			sidebarRight: { openResource() {} },
+		},
 	});
 	plugin.apply(ctx);
-	assert.deepEqual(asked, [], "apply must not resolve them");
 
-	registrations.find((r) => r.options.name === "main").component({});
-	assert.deepEqual(asked.sort(), ["layout", "sidebarRight"]);
+	assert.deepEqual(asked, [], "the services must come from the declared properties");
+	assert.equal(registrations.length, 3);
+
+	// And the page it built really does carry the action.
+	const main = registrations.find((r) => r.options.name === "main");
+	assert.equal(typeof main.component, "function");
 });
 
 test("galleryActions gains openInRightbar only when the service is mounted", () => {
@@ -247,21 +254,44 @@ test("galleryActions gains openInRightbar only when the service is mounted", () 
 	assert.equal(typeof withService.openInRightbar, "function");
 });
 
-test("apply registers both slots even when no service is mounted", () => {
-	// The degradation property: a missing service costs one button, not the panel.
-	// (When the services get resolved is asserted separately, above.)
-	const { ctx, registrations } = createCtx({ services: {} });
+test("apply registers three working components", () => {
+	// `sidebarRight` and `layout` are declared dependencies, so Cordis does not call
+	// `apply` at all until they exist — there is no "service missing" state left to
+	// degrade into.
+	const { ctx, registrations } = createCtx({
+		services: { layout: { selectPanel() {} }, sidebarRight: { openResource() {} } },
+	});
 	plugin.apply(ctx);
 
-	assert.equal(registrations.length, 2);
-	assert.equal(
-		typeof registrations.find((r) => r.options.name === "main").component,
-		"function"
+	assert.equal(registrations.length, 3);
+	for (const entry of registrations) {
+		assert.equal(typeof entry.component, "function", entry.options.name);
+	}
+});
+
+test("the header entry opens the gallery panel", () => {
+	const selected = [];
+	const { ctx, registrations } = createCtx({
+		services: {
+			layout: { selectPanel: (id) => selected.push(id) },
+			sidebarRight: { openResource() {} },
+		},
+	});
+	plugin.apply(ctx);
+
+	const header = registrations.find(
+		(r) => r.options.name === "conversation.session.header.utilities"
 	);
-	assert.equal(
-		typeof registrations.find((r) => r.options.name === "sidebar.panellist").component,
-		"function"
-	);
+	const tree = header.component({});
+	assert.equal(typeof tree.props.onClick, "function");
+	tree.props.onClick();
+	assert.deepEqual(selected, ["manim-gallery"]);
+});
+
+test("the header button reports a missing layout service instead of throwing", () => {
+	assert.equal(openGalleryPanel({}), false);
+	assert.equal(openGalleryPanel({ layout: {} }), false);
+	assert.equal(openGalleryPanel({ layout: { selectPanel() {} } }), true);
 });
 
 test("the actions built for the page reach the resolved service", () => {
