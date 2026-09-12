@@ -6419,6 +6419,17 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 
 > 第 8 条的教训值得单独记一笔：`ast.parse` 通过并不代表代码能 import。任何把值编译成源码的地方（`scenes/`）都不能只用 `ast.parse` 断言，要么用 `python_literal()` 这类共享助手，要么真跑一次。
 
+**画面验收发现的模板缺陷（第 15–17 条，在 Task 20 之后修复）**：
+
+| # | 任务 | 问题 | 修法 |
+|---|---|---|---|
+| 15 | Task 10 | `Axes.plot` **不按 `y_range` 裁剪**：`x**2` 在 `x_range=[-4,4]`、`y_range=[-3,3]` 下 y 到 16，抛物线冲出画面顶部并从标题中间穿过；`y` 轴标签也与标题挤在同一横带 | 新增 `visible_bounds(expression, bindings)`：在 `X_RANGE` 上采样，取曲线仍落在 `Y_RANGE` 内的 x 子区间作为绘制区间（参数分支逐帧重算）；面积区间同样夹进 bounds；有标题时 `axes`/`labels` 一起 `DOWN * 0.55`，标题 buff 收到 0.45 |
+| 16 | Task 11 | **绕行判据不完整**：`backwards = target_index <= source_index` 只处理反向边。`check`(2)→`out`(4) 这条向前跳级边被当成正向，画成直线**穿过中间的 `recurse`(3) 方框** | 判据改为「只有**单步向前**（`step == 1`）才画直线」，其余一律绕行：向前跳级向右弓、向后绕向左弓。测试同步改为断言 `straight = step == 1` |
+| 17 | Task 11 | **标签挂错分支**：`not straight` 分支用 `forward` 决定标签左右，而弧线朝哪边弓由 `forward` 与 `skipping` 共同决定，于是「是」跑到「否」的弧线上——**把判定分支的意思弄反了**。另外锚点用的是弦中点（`get_center()`），对弓形边而言那正是它绕开的方框所在处 | 锚点改为弧顶 `arrow.point_from_proportion(0.5)`；左右按「边实际离开列的方向」取（直行/向前→右，向后→左）；向后边的标签因弧顶离列仅 ~0.3 单位不够容纳中文，改挂在**列左外沿**、高度取弧顶。删掉约 60 行基于方框几何的脆弱定位 |
+| — | Task 11 | 修复过程中引入并随即修正的回归：`Arrow(buff=0.18)` 在**两端各缩 0.18**，而相邻方框间距只有 0.55 → 箭身只剩 0.19 单位，480p 下完全看不见 | 引入 `NODE_GAP=0.62` / `ARROW_BUFF=0.06` / `ARROW_TIP_LENGTH=0.18` / `ARROW_TIP_RATIO=0.35`，并加一条**性质断言**（`NODE_GAP - 2*ARROW_BUFF >= MIN_VISIBLE_SHAFT`）代替钉魔法数字 |
+
+> 第 15–17 条同样是**单元测试完全无法发现**的：它们全是几何与视觉问题，断言只能验「源码里有没有某个名字」。`tests/manual/export_last_frames.py`（导出各模板末帧 PNG）与 `read_image` 目视检查是唯一有效的关口。
+
 | 15 | Task 18 | `tests/test_app.py` 的 `test_selftest_returns_nonzero_when_a_dependency_is_missing` 断言 `app.selftest(broken) == 2`，但 Task 18 建的 `tools/selftest.py` 按计划就是 `return 0` 的占位版（Task 19 才替换），该测试在 Task 18 **必然红**，与「每个任务真的走红→绿」的纪律冲突 | Task 18 的 `tests/test_app.py` **不含**这个测试（它的主题属于 Task 19，且 Task 19 的 `test_missing_ffmpeg_exits_two_and_creates_no_run` 已覆盖同一行为），Task 18 实际 7 passed（计划写 8 passed） |
 
 | 16 | Task 20（真机验收 Step 3 后的目视验收） | **完成判据 5「故意喂坏代码，信封含正确的 `line` 与非空 `hint`」在真机上根本达不到**：manim 0.20.1 的失败渲染**不打印普通 traceback**，`error_console.print_exception()` 画的是 rich 边框面板（右侧补空格、长路径折成两行）。面板里每一行都不匹配 `FRAME_RE`，于是 `parse_traceback` 返回 `(None, None, None)`，tool 信封退化成 `{stage:"manim", message:"manim 退出码 1"}`——**type / line / sourceLine / hint 全部丢失**。Task 6 的 fixture 是手写的普通格式，所以单元测试全绿而真机全废 | `engine/diagnostics.py` 新增 `unwrap_panels()`：去掉面板边框、`PANEL_HEADER_RE` 去掉带标题的顶边、把被 rich 从扩展名中间折断的 frame 行重新拼回（`scene.p` + `y:6 in construct` → `File "...scene.py", line 6, in construct`）。判据不是猜行形状，而是「拼接后能否解析成 frame」，所以普通 traceback 原样通过。`FRAME_RE` 放宽为容忍 rich 吞掉逗号（`",? +line"`），异常类型改用 `re.search`（面板里异常前有边框，不再位于行首）。新增 `tests/fixtures/manim_panel_nameerror.txt`（真机 stderr 原文）+ 3 个回归测试 |
