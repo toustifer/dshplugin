@@ -180,6 +180,62 @@ test("openInRightbar still works when the layout service is absent", () => {
 	assert.equal(seen.length, 1);
 });
 
+test("openInRightbar retries until the right column has bound its session", () => {
+	// The controller throws "no session surface is mounted" until React has rendered
+	// the column, so the first click on a closed sidebar clears only after retries.
+	let calls = 0;
+	const sidebarRight = {
+		openResource() {
+			calls += 1;
+			if (calls < 3) throw new Error("sidebarRight: no session surface is mounted");
+		},
+	};
+	const scheduled = [];
+	openInRightbar("D:\\r\\a.gif", { sidebarRight }, {
+		attempts: 5,
+		schedule: (fn) => scheduled.push(fn),
+	});
+
+	assert.equal(calls, 1, "the first attempt happens immediately");
+	assert.equal(scheduled.length, 1, "a failed attempt schedules the next one");
+
+	scheduled.shift()();
+	assert.equal(calls, 2);
+	scheduled.shift()();
+	assert.equal(calls, 3, "the third attempt succeeds");
+	assert.equal(scheduled.length, 0, "nothing more is scheduled after success");
+});
+
+test("openInRightbar gives up loudly instead of leaving a dead button", () => {
+	const warned = [];
+	const sidebarRight = {
+		openResource() {
+			throw new Error("sidebarRight: no session surface is mounted");
+		},
+	};
+	openInRightbar("D:\\r\\a.gif", { sidebarRight }, {
+		attempts: 3,
+		schedule: (fn) => fn(),
+		warn: (message) => warned.push(message),
+	});
+
+	assert.equal(warned.length, 1, "a silent failure is the worst outcome");
+	assert.match(String(warned[0]), /右栏|右侧|sidebar/i);
+});
+
+test("the page resolves the services on render, not at apply time", () => {
+	// `sidebarRight` is contributed by another client plugin. Resolving it once in
+	// `apply` would hide the button whenever that plugin happens to apply later.
+	const { ctx, registrations, asked } = createCtx({
+		services: { sidebarRight: { openResource() {} } },
+	});
+	plugin.apply(ctx);
+	assert.deepEqual(asked, [], "apply must not resolve them");
+
+	registrations.find((r) => r.options.name === "main").component({});
+	assert.deepEqual(asked.sort(), ["layout", "sidebarRight"]);
+});
+
 test("galleryActions gains openInRightbar only when the service is mounted", () => {
 	const base = { setState: () => {}, services: {} };
 	assert.equal(galleryActions(base).openInRightbar, undefined);
@@ -191,14 +247,21 @@ test("galleryActions gains openInRightbar only when the service is mounted", () 
 	assert.equal(typeof withService.openInRightbar, "function");
 });
 
-test("apply probes the services instead of demanding them", () => {
-	const { ctx, registrations, asked } = createCtx({ services: {} });
+test("apply registers both slots even when no service is mounted", () => {
+	// The degradation property: a missing service costs one button, not the panel.
+	// (When the services get resolved is asserted separately, above.)
+	const { ctx, registrations } = createCtx({ services: {} });
 	plugin.apply(ctx);
 
-	assert.deepEqual(asked.sort(), ["layout", "sidebarRight"]);
-	// Both slots still register: a missing service costs one button, not the panel.
 	assert.equal(registrations.length, 2);
-	assert.equal(typeof registrations.find((r) => r.options.name === "main").component, "function");
+	assert.equal(
+		typeof registrations.find((r) => r.options.name === "main").component,
+		"function"
+	);
+	assert.equal(
+		typeof registrations.find((r) => r.options.name === "sidebar.panellist").component,
+		"function"
+	);
 });
 
 test("the actions built for the page reach the resolved service", () => {

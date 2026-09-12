@@ -122,19 +122,55 @@ window.__ModuleLoader__.load({
 		/**
 		 * Open one artifact in the right sidebar.
 		 *
-		 * The sidebar is expanded first: `openResource` adds a tab, and whether it
-		 * also reveals the column is not part of its contract, so asking explicitly
-		 * avoids a tab that exists out of sight.
+		 * Two timing facts drive the shape of this function, both read out of the
+		 * shipped sidebar-right client:
+		 *
+		 * 1. `openResource` goes through `controller.require()`, which THROWS
+		 *    `"sidebarRight: no session surface is mounted"` until the column's seat
+		 *    has mounted and bound the current session. Expanding the column and
+		 *    calling it in the same tick therefore throws, and the click looks dead —
+		 *    so the call is retried until the binding exists.
+		 * 2. Whether `openResource` also reveals the column is not part of its
+		 *    contract, so the column is expanded explicitly first.
+		 *
+		 * Giving up silently is not allowed: the button would stay there looking
+		 * alive, so the last failure is reported.
 		 */
-		function openInRightbar(absolutePath, services = {}) {
+		function openInRightbar(absolutePath, services = {}, options = {}) {
 			const { sidebarRight, layout } = services;
 			if (sidebarRight === undefined || typeof sidebarRight.openResource !== "function") {
 				return false;
 			}
+
 			if (layout !== undefined && typeof layout.openRightbar === "function") {
 				layout.openRightbar(true, false);
 			}
-			sidebarRight.openResource(resourceAddress(absolutePath));
+
+			const address = resourceAddress(absolutePath);
+			const attempts = options.attempts ?? 40;
+			const delayMs = options.delayMs ?? 50;
+			const schedule = options.schedule ?? ((fn) => globalThis.setTimeout(fn, delayMs));
+			const warn = options.warn ?? ((message) => console.warn(message));
+			let tries = 0;
+
+			const attempt = () => {
+				tries += 1;
+				try {
+					sidebarRight.openResource(address);
+					return true;
+				} catch (error) {
+					if (tries >= attempts) {
+						warn(
+							`[manim-gallery] 无法在右侧栏打开动画（已重试 ${tries} 次）：${error?.message ?? error}`
+						);
+						return false;
+					}
+					schedule(attempt);
+					return false;
+				}
+			};
+
+			attempt();
 			return true;
 		}
 
@@ -540,14 +576,26 @@ window.__ModuleLoader__.load({
 		}
 
 		/**
-		 * The panel component, bound to the services resolved when the plugin applied.
+		 * The panel component: React wiring only, plus the service lookup.
 		 *
-		 * React wiring only: state in, `galleryView` out. Every decision it could get
-		 * wrong lives in a pure function next to it.
+		 * The services are resolved on the FIRST RENDER rather than in `apply`.
+		 * `sidebarRight` is contributed by another client plugin, and `apply` order
+		 * between plugins is not something this package can rely on — resolving it
+		 * once at apply time would silently hide the button whenever that plugin
+		 * happened to apply later. The panel itself only mounts long after every
+		 * client plugin has applied, so render time is the honest moment to ask.
 		 */
-		function makeGalleryPage(services) {
+		function makeGalleryPage(ctx) {
 			return function GalleryPage() {
 				const [state, setState] = react.useState(INITIAL_STATE);
+
+				const services = react.useMemo(
+					() => ({
+						layout: ctx.get("layout"),
+						sidebarRight: ctx.get("sidebarRight"),
+					}),
+					[]
+				);
 
 				react.useEffect(() => {
 					loadInto(setState);
@@ -569,12 +617,6 @@ window.__ModuleLoader__.load({
 
 		function apply(ctx) {
 			ensureStyle();
-			// Probed, not demanded: `sidebarRight` ships with DSH, but a missing service
-			// must cost the panel one button, not the whole panel.
-			const services = {
-				layout: ctx.get("layout"),
-				sidebarRight: ctx.get("sidebarRight"),
-			};
 			ctx.slots.inject("sidebar.panellist", () =>
 				ctx.slots.register(
 					{ name: "sidebar.panellist", id: PANEL_ID, order: 40, label: "动画库" },
@@ -582,7 +624,7 @@ window.__ModuleLoader__.load({
 				)
 			);
 			ctx.slots.inject("main", () =>
-				ctx.slots.register({ name: "main", key: PANEL_ID }, makeGalleryPage(services))
+				ctx.slots.register({ name: "main", key: PANEL_ID }, makeGalleryPage(ctx))
 			);
 		}
 
