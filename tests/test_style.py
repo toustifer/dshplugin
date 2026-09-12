@@ -12,6 +12,12 @@ def test_palette_matches_the_spec():
     assert style.GREY == "#5A6472"
 
 
+def test_edge_colour_is_lighter_than_grey():
+    """C_GREY is the axis colour; a thin arrow needs more contrast on #0E1116."""
+    assert style.EDGE == "#8A94A6"
+    assert style.EDGE != style.GREY
+
+
 def test_detects_the_first_available_candidate():
     fonts = ["Arial", "SimHei", "Microsoft YaHei"]
     assert style.detect_cjk_font(fonts) == "Microsoft YaHei"
@@ -46,6 +52,7 @@ def test_preamble_declares_every_constant_and_the_helper():
     assert 'C_GREEN = "#7BE495"' in text
     assert 'C_RED = "#FF6B6B"' in text
     assert 'C_GREY = "#5A6472"' in text
+    assert 'C_EDGE = "#8A94A6"' in text
     assert 'FONT_CJK = "SimHei"' in text
     assert "def cn(" in text
 
@@ -76,6 +83,7 @@ def test_style_guide_facts_reports_the_local_fonts():
 def test_style_guide_facts_carries_the_palette_and_pacing():
     facts = style.style_guide_facts(None, [])
     assert facts["palette"]["background"] == "#0E1116"
+    assert facts["palette"]["edge"] == "#8A94A6"
     assert facts["typography"] == {"title": 44, "body": 32, "note": 24}
     assert facts["pacing"] == {"play_run_time": 1.0, "tail_wait": 0.5}
 

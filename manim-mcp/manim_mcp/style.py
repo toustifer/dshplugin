@@ -16,6 +16,10 @@ HIGHLIGHT = "#FFD166"
 GREEN = "#7BE495"
 RED = "#FF6B6B"
 GREY = "#5A6472"
+# Axes and box outlines read fine in GREY because they are thick and closed. A
+# thin arrow on #0E1116 does not: at 3px the grey disappears into the background,
+# so edges get their own lighter step.
+EDGE = "#8A94A6"
 
 TITLE_SIZE = 44
 BODY_SIZE = 32
@@ -43,6 +47,7 @@ PALETTE = {
     "green": GREEN,
     "red": RED,
     "grey": GREY,
+    "edge": EDGE,
 }
 
 
@@ -112,6 +117,7 @@ C_HIGHLIGHT = {_literal(HIGHLIGHT)}
 C_GREEN = {_literal(GREEN)}
 C_RED = {_literal(RED)}
 C_GREY = {_literal(GREY)}
+C_EDGE = {_literal(EDGE)}
 
 TITLE_SIZE = {TITLE_SIZE}
 BODY_SIZE = {BODY_SIZE}

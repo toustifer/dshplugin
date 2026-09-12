@@ -22,6 +22,9 @@ PARAMS = {
 MAX_NODES = 8
 KINDS = ("process", "decision", "terminal", "data")
 LAYOUTS = ("vertical", "horizontal")
+BOX_HEIGHT = 0.95
+# Minimum gap left between a label and the arrow or box it sits next to.
+ARROW_SEPARATION = 0.14
 
 _TEMPLATE = '''from manim import *
 
@@ -29,6 +32,8 @@ _TEMPLATE = '''from manim import *
 
 LAYOUT = @@LAYOUT@@
 TITLE = @@TITLE@@
+BOX_HEIGHT = @@BOX_HEIGHT@@
+ARROW_SEPARATION = @@ARROW_SEPARATION@@
 KIND_COLORS = {
     "process": C_BLUE,
     "decision": C_HIGHLIGHT,
@@ -62,7 +67,7 @@ class DiagramScene(Scene):
             box = RoundedRectangle(
                 corner_radius=0.14,
                 width=label_width(label),
-                height=0.95,
+                height=BOX_HEIGHT,
                 color=KIND_COLORS[kind],
                 fill_opacity=0.14,
                 stroke_width=2.5,
@@ -92,48 +97,153 @@ class DiagramScene(Scene):
             start_box = boxes[source_index][0]
             end_box = boxes[target_index][0]
 
-            # Reading order runs top-to-bottom (or left-to-right). A forward edge
-            # is a straight arrow anchored on the facing box edges, so it cannot
-            # touch the boxes it passes. A back edge — the loop in a cyclic
-            # process — would be drawn straight through every box between the two
-            # nodes, so it bows out around the side of the column instead.
-            backwards = target_index <= source_index
+            # Reading order runs top-to-bottom (or left-to-right). Only a hop
+            # between *neighbours* can be a straight arrow anchored on the facing
+            # box edges. Any edge that skips over at least one node — in either
+            # direction — would be drawn straight through the box in between, so
+            # it leaves the column instead. Node order, not edge direction, is
+            # what decides this: `check` -> `out` moves forward and still crosses
+            # `recurse`, so "backwards" was the wrong question to ask.
+            step = target_index - source_index
+            adjacent = abs(step) == 1
+            skipping = abs(step) > 1
+            forward = step > 0
+
             if LAYOUT == "horizontal":
-                if backwards:
+                if adjacent:
+                    if forward:
+                        start = start_box.get_right()
+                        end = end_box.get_left()
+                    else:
+                        start = start_box.get_left()
+                        end = end_box.get_right()
+                    arc = 0.0
+                elif skipping and forward:
                     start = start_box.get_top() + UP * 0.55
                     end = end_box.get_top() + UP * 0.55
                     arc = 1.6
-                else:
+                elif skipping:
+                    start = start_box.get_bottom() + DOWN * 0.55
+                    end = end_box.get_bottom() + DOWN * 0.55
+                    arc = -1.6
+                else:  # the same node twice: a self-loop, handled by the skipping path
                     start = start_box.get_right()
-                    end = end_box.get_left()
+                    end = end_box.get_right()
                     arc = 0.0
             else:
-                if backwards:
+                if adjacent:
+                    if forward:
+                        start = start_box.get_bottom()
+                        end = end_box.get_top()
+                    else:
+                        start = start_box.get_top()
+                        end = end_box.get_bottom()
+                    arc = 0.0
+                elif skipping and forward:
+                    start = start_box.get_right() + RIGHT * 0.6
+                    end = end_box.get_right() + RIGHT * 0.6
+                    arc = 1.6
+                elif skipping:
                     start = start_box.get_left() + LEFT * 0.6
                     end = end_box.get_left() + LEFT * 0.6
                     arc = -1.6
                 else:
-                    start = start_box.get_bottom()
-                    end = end_box.get_top()
+                    start = start_box.get_right()
+                    end = end_box.get_right()
                     arc = 0.0
 
             arrow = Arrow(
                 start,
                 end,
                 path_arc=arc,
-                buff=0.14,
-                color=C_GREY,
+                buff=0.18,
+                color=C_EDGE,
                 stroke_width=3,
                 max_tip_length_to_length_ratio=0.12,
             )
             arrows.add(arrow)
             if edge_label:
                 tag = cn(edge_label, NOTE_SIZE - 6, C_HIGHLIGHT)
-                if backwards:
-                    offset = LEFT * 0.95 if LAYOUT == "vertical" else UP * 0.5
+                # A label never uses the arrow's own centre: on a bowing edge that
+                # centre is the empty middle of the curve, which is exactly where
+                # the boxes it was routed around still are. Measured facts that
+                # drive the placement below:
+                #   * the straight adjacent arrow runs down the middle of the gap
+                #     between two rows, so a tag anchored on the box centres lands
+                #     on the nodes and on that line;
+                #   * a handful of CJK glyphs is wider than the gap between two
+                #     boxes, so the tag has to leave the column.
+                # Hence: tags sit beside the column at a gap centre, or (for a
+                # skipping edge) inside the gap, just off the bow.
+                midpoint = (np.array(start) + np.array(end)) / 2
+                if not adjacent:
+                    # The row gap is the one band no box occupies: put the tag on
+                    # its far side so neither border is touched.
+                    gap_top = end_box.get_top()[1] if forward else start_box.get_top()[1]
+                    gap_bottom = (
+                        start_box.get_bottom()[1] if forward else end_box.get_bottom()[1]
+                    )
+                    if LAYOUT == "horizontal":
+                        tag.move_to([midpoint[0], (gap_top + gap_bottom) / 2, 0])
+                        tag.shift(
+                            UP * (tag.height / 2 + ARROW_SEPARATION)
+                            if forward
+                            else DOWN * (tag.height / 2 + ARROW_SEPARATION)
+                        )
+                    else:
+                        column_edge = min(
+                            start_box.get_left()[0], end_box.get_left()[0]
+                        )
+                        tag.move_to(
+                            [
+                                column_edge - ARROW_SEPARATION - tag.width / 2,
+                                (gap_top + gap_bottom) / 2,
+                                0,
+                            ]
+                        )
+                        tag.shift(
+                            RIGHT * (tag.width / 2 + ARROW_SEPARATION)
+                            if forward
+                            else UP * (tag.height / 2 + ARROW_SEPARATION)
+                        )
+                elif LAYOUT == "horizontal":
+                    column_top = max(start_box.get_top()[1], end_box.get_top()[1])
+                    column_bottom = min(
+                        start_box.get_bottom()[1], end_box.get_bottom()[1]
+                    )
+                    gap_center = (
+                        (column_top + end_box.get_top()[1]) / 2
+                        if forward
+                        else (column_bottom + end_box.get_bottom()[1]) / 2
+                    )
+                    tag.move_to([midpoint[0], gap_center, 0])
+                    tag.shift(
+                        UP * (tag.height / 2 + ARROW_SEPARATION)
+                        if forward
+                        else DOWN * (tag.height / 2 + ARROW_SEPARATION)
+                    )
+                elif forward:
+                    # Just off the right of the box outline, so the tag touches
+                    # neither the line running down the gap nor the box below.
+                    edge_right = max(start_box.get_right()[0], end_box.get_right()[0])
+                    tag.move_to(
+                        [
+                            edge_right + ARROW_SEPARATION + tag.width / 2,
+                            (start_box.get_bottom()[1] + end_box.get_top()[1]) / 2,
+                            0,
+                        ]
+                    )
                 else:
-                    offset = RIGHT * 0.45 if LAYOUT == "vertical" else UP * 0.32
-                tag.move_to(arrow.get_center() + offset)
+                    # The same, mirrored: this is the loop edge running back up
+                    # the column, and its tag cannot sit on the boxes it links.
+                    edge_left = min(start_box.get_left()[0], end_box.get_left()[0])
+                    tag.move_to(
+                        [
+                            edge_left - ARROW_SEPARATION - tag.width / 2,
+                            (start_box.get_top()[1] + end_box.get_bottom()[1]) / 2,
+                            0,
+                        ]
+                    )
                 labels.add(tag)
 
         self.play(
@@ -162,6 +272,10 @@ def _literal(value) -> str:
     `NameError: name 'null' is not defined` the moment Manim imports the file.
     """
     return python_literal(value)
+
+
+def _number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
 
 
 def _nodes(value) -> list[tuple[str, str, str]]:
@@ -242,6 +356,8 @@ def build(**kwargs) -> str:
         _TEMPLATE.replace("@@PREAMBLE@@", preamble(kwargs.get("cjk_font")))
         .replace("@@LAYOUT@@", _literal(layout))
         .replace("@@TITLE@@", _literal(title or ""))
+        .replace("@@BOX_HEIGHT@@", _number(BOX_HEIGHT))
+        .replace("@@ARROW_SEPARATION@@", _number(ARROW_SEPARATION))
         .replace(
             "@@NODES@@",
             "\n".join(f"    ({_literal(a)}, {_literal(b)}, {_literal(c)})," for a, b, c in nodes),
