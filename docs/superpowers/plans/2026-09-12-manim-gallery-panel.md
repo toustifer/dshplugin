@@ -294,7 +294,7 @@ Expected: FAIL — `ENOENT: no such file or directory, open '...\lib\client.js'`
     }
   },
   "scripts": {
-    "test": "node --test "test/*.test.mjs""
+    "test": "node --test \"test/*.test.mjs\""
   },
   "license": "MIT",
   "peerDependencies": {
@@ -556,7 +556,7 @@ test("loadIndex tolerates a missing updatedAt", async () => {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"pure.test.mjs`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/pure.test.mjs"`
 Expected: FAIL — `TypeError: Cannot destructure property 'RENDER_ROOT' of 'plugin.__internals' as it is undefined`
 
 - [ ] **Step 3: 写实现**
@@ -871,7 +871,7 @@ function actions() {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"view.test.mjs`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/view.test.mjs"`
 Expected: FAIL — `TypeError: galleryView is not a function`
 
 - [ ] **Step 3: 写实现**
@@ -1258,7 +1258,7 @@ test("copyToClipboard swallows a rejected write", async () => {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"page.test.mjs`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/page.test.mjs"`
 Expected: FAIL — `TypeError: copyToClipboard is not a function`
 
 - [ ] **Step 3: 写实现**
@@ -1413,7 +1413,7 @@ test("ensureStyle is a no-op without a document", () => {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"style.test.mjs`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/style.test.mjs"`
 Expected: FAIL — `TypeError: ensureStyle is not a function`
 
 - [ ] **Step 3: 写实现**
