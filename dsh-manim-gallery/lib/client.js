@@ -11,6 +11,53 @@ window.__ModuleLoader__.load({
 		/** The panel id. The sidebar entry and the `main` key must be this one string. */
 		const PANEL_ID = "manim-gallery";
 
+		const STYLE_ID = "@dsh-manim-gallery/panel.css";
+
+		/**
+		 * Colours are theme tokens only. A literal here would survive a switch to the
+		 * light theme and paint dark-on-dark, which is exactly the failure mode the
+		 * `--dsw-*` vocabulary exists to prevent.
+		 */
+		const GALLERY_CSS = `
+.manim-gallery { display: flex; flex-direction: column; gap: 16px; padding: 20px 24px; height: 100%; overflow: auto; color: var(--dsw-alias-label-primary); }
+.manim-gallery__glyph { display: block; }
+.manim-gallery__glyph.is-active { color: var(--dsw-alias-label-primary); }
+.manim-gallery__toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.manim-gallery__search, .manim-gallery__select { background: var(--dsw-alias-bg-base); color: inherit; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 6px 10px; font: inherit; }
+.manim-gallery__search { min-width: 220px; }
+.manim-gallery__button { background: var(--dsw-alias-interactive-bg-hover); color: inherit; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+.manim-gallery__button:hover { background: var(--dsw-alias-interactive-bg-active); }
+.manim-gallery__toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.manim-gallery__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+.manim-gallery__card { display: flex; flex-direction: column; gap: 8px; padding: 10px; text-align: left; background: var(--dsw-alias-bg-base); color: inherit; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; cursor: pointer; font: inherit; }
+.manim-gallery__card:hover { border-color: var(--dsw-alias-label-primary); }
+.manim-gallery__thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--dsw-alias-bg-base); border-radius: 6px; }
+.manim-gallery__thumb.is-missing, .manim-gallery__player.is-missing { display: flex; align-items: center; justify-content: center; color: var(--dsw-alias-label-tertiary); font-size: 13px; }
+.manim-gallery__cardTitle { font-size: 14px; font-weight: 600; }
+.manim-gallery__cardMeta { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.manim-gallery__cardMeta .is-failed { color: var(--dsw-alias-label-error, inherit); }
+.manim-gallery__detail { display: flex; flex-direction: column; gap: 16px; }
+.manim-gallery__detailBar { display: flex; gap: 12px; align-items: center; }
+.manim-gallery__detailTitle { font-size: 16px; margin: 0; flex: 1; }
+.manim-gallery__player { width: 100%; max-height: 60vh; background: var(--dsw-alias-bg-base); border-radius: 8px; }
+.manim-gallery__facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }
+.manim-gallery__facts dt { color: var(--dsw-alias-label-tertiary); }
+.manim-gallery__facts dd { margin: 0; overflow-wrap: anywhere; }
+.manim-gallery__error { color: var(--dsw-alias-label-error, inherit); }
+.manim-gallery__hint { color: var(--dsw-alias-label-tertiary); font-size: 13px; }
+`;
+
+		function ensureStyle() {
+			const doc = globalThis.document;
+			if (doc === undefined) return;
+			if (doc.querySelector(`style[data-plugin-css="${STYLE_ID}"]`) !== null) return;
+			const tag = doc.createElement("style");
+			tag.dataset.plugin = "dsh-manim-gallery";
+			tag.dataset.pluginCss = STYLE_ID;
+			tag.textContent = GALLERY_CSS;
+			doc.head.appendChild(tag);
+		}
+
 		/**
 		 * Where manim-mcp writes its runs. `install.ps1` rewrites the string literal
 		 * on the next line so the panel and the MCP always agree on one root; keep
@@ -427,6 +474,7 @@ window.__ModuleLoader__.load({
 		}
 
 		function apply(ctx) {
+			ensureStyle();
 			ctx.slots.inject("sidebar.panellist", () =>
 				ctx.slots.register(
 					{ name: "sidebar.panellist", id: PANEL_ID, order: 40, label: "动画库" },
@@ -445,6 +493,9 @@ window.__ModuleLoader__.load({
 			RENDER_ROOT,
 			INDEX_PATH,
 			TOOL_LABELS,
+			STYLE_ID,
+			GALLERY_CSS,
+			ensureStyle,
 			fileUrl,
 			indexUrl,
 			relativeTime,
