@@ -4,7 +4,7 @@
 
 **Goal:** 把已经建好的两个组件真正接进这台 DSH：(1) 写一个 Skill 教会模型「什么时候画、怎么画、画砸了怎么办」；(2) 写一个幂等的安装/卸载器，把 MCP 行、面板插件、Skill 三样东西挂上去，并且能干净地还原；(3) 在真实 DSH 页面上验收，直到对话里出现动画、左侧栏出现「动画库」。
 
-**Architecture:** 用户面对的是两个 PowerShell 脚本（`install.ps1` / `uninstall.ps1`），但**所有会改文件的逻辑都在 Python 里**（`tools/installer.py`），因为那是可以被 pytest 精确断言的部分：YAML 块的手术、`package.json` 的编辑、`RENDER_ROOT` 的补丁、Skill 的复制，全部是「给一个沙盒路径 → 得到确定结果」的纯函数 + 一次应用。PowerShell 只做参数解析、依赖体检、调用 Python、打印结果。这样安排的原因很直接：在 PowerShell 里做保留注释的 YAML 手术并断言其正确性，比在 Python 里难得多，而安装器改的是**用户的 profile**，出错代价高。
+**Architecture:** 用户面对的是两个 PowerShell 脚本（`install.ps1` / `uninstall.ps1`），但**所有会改文件的逻辑都在 Python 里**（`tools/dsh_installer.py`），因为那是可以被 pytest 精确断言的部分：YAML 块的手术、`package.json` 的编辑、`RENDER_ROOT` 的补丁、Skill 的复制，全部是「给一个沙盒路径 → 得到确定结果」的纯函数 + 一次应用。PowerShell 只做参数解析、依赖体检、调用 Python、打印结果。这样安排的原因很直接：在 PowerShell 里做保留注释的 YAML 手术并断言其正确性，比在 Python 里难得多，而安装器改的是**用户的 profile**，出错代价高。
 
 **Tech Stack:** PowerShell 7（薄壳）、Python 3.13 + pytest（核心与测试）、PyYAML 6.0.3（只用于**校验**改完的 YAML 仍合法，不用于序列化——序列化会吃掉注释）、pnpm 11（建链接）。
 
@@ -38,7 +38,7 @@ D:\myprogram\dshplugin\
 ├─ install.ps1                     用户入口：依赖体检 → 调 Python 核心 → 打印结果与重启提示
 ├─ uninstall.ps1                   用户入口：调 Python 核心做还原
 ├─ tools\
-│  └─ installer.py                 全部会改文件的逻辑（纯函数 + apply），可被 pytest 精确断言
+│  └─ dsh_installer.py                 全部会改文件的逻辑（纯函数 + apply），可被 pytest 精确断言
 ├─ skills\
 │  └─ manim-explainer\
 │     └─ SKILL.md                  行为层：何时画 / 选哪个工具 / 自愈协议 / 硬性要求
@@ -49,14 +49,14 @@ D:\myprogram\dshplugin\
    └─ test_skill_doc.py            SKILL.md 的结构不变量（钉住工具名与必写章节，防止漂移）
 ```
 
-**为什么把 installer 放在 `tools/` 而不是 `scripts/`**：`tools/` 下面已经有 `manim-mcp/manim_mcp/tools/`（MCP 工具），容易被混淆，所以这里用仓库根的 `tools/installer.py`，并在文件头注明它是**安装器**而不是 MCP 工具。它不属于 `manim_mcp` 包，因此 pytest 通过 `importlib` 按路径加载（Task 1 的 conftest 处理）。
+**为什么把 installer 放在 `tools/` 而不是 `scripts/`**：`tools/` 下面已经有 `manim-mcp/manim_mcp/tools/`（MCP 工具），容易被混淆，所以这里用仓库根的 `tools/dsh_installer.py`，并在文件头注明它是**安装器**而不是 MCP 工具。它不属于 `manim_mcp` 包，因此 pytest 通过 `importlib` 按路径加载（Task 1 的 conftest 处理）。
 
 ---
 
 ## Task 1: 目标路径推导与三个文本变换的纯函数
 
 **Files:**
-- Create: `tools/installer.py`
+- Create: `tools/dsh_installer.py`
 - Modify: `tests/conftest.py`（把 `tools/` 加入 `sys.path`）
 - Test: `tests/test_installer_paths.py`
 
@@ -84,7 +84,7 @@ from pathlib import Path
 
 import pytest
 
-from installer import (
+from dsh_installer import (
     MANIM_BLOCK_ID,
     GALLERY_PACKAGE,
     PANEL_ID,
@@ -307,7 +307,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'installer'`
 
 - [ ] **Step 4: 写实现**
 
-`tools/installer.py`:
+`tools/dsh_installer.py`:
 
 ```python
 """Installer core for the Manim visual-explainer plugin set.
@@ -539,7 +539,7 @@ Expected: PASS（20 passed）
 - [ ] **Step 6: 提交**
 
 ```bash
-git add tools/installer.py tests/test_installer_paths.py tests/conftest.py
+git add tools/dsh_installer.py tests/test_installer_paths.py tests/conftest.py
 git commit -m "feat(installer): 目标路径推导与三个文本变换的纯函数"
 ```
 
@@ -548,7 +548,7 @@ git commit -m "feat(installer): 目标路径推导与三个文本变换的纯函
 ## Task 2: 应用安装 / 卸载（沙盒往返一致）
 
 **Files:**
-- Modify: `tools/installer.py`
+- Modify: `tools/dsh_installer.py`
 - Test: `tests/test_installer_apply.py`
 
 - [ ] **Step 1: 写失败测试**
@@ -568,7 +568,7 @@ from pathlib import Path
 
 import pytest
 
-from installer import (
+from dsh_installer import (
     GALLERY_PACKAGE,
     InstallerError,
     Targets,
@@ -776,7 +776,7 @@ Expected: FAIL — `ImportError: cannot import name 'apply_install' from 'instal
 
 - [ ] **Step 3: 写实现**
 
-在 `tools/installer.py` 末尾追加：
+在 `tools/dsh_installer.py` 末尾追加：
 
 ```python
 @dataclass
@@ -1022,7 +1022,7 @@ Expected: PASS（13 passed）
 - [ ] **Step 5: 提交**
 
 ```bash
-git add tools/installer.py tests/test_installer_apply.py
+git add tools/dsh_installer.py tests/test_installer_apply.py
 git commit -m "feat(installer): 安装/卸载编排与沙盒往返一致"
 ```
 
@@ -1055,7 +1055,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[1]
-INSTALLER = REPO / "tools" / "installer.py"
+INSTALLER = REPO / "tools" / "dsh_installer.py"
 
 
 def run(*args: str, cwd: Path = REPO) -> subprocess.CompletedProcess:
@@ -1168,14 +1168,14 @@ def test_the_powershell_entry_point_is_a_thin_wrapper():
     comment that describes the design.
     """
     text = (REPO / "install.ps1").read_text(encoding="utf-8-sig")
-    assert "installer.py" in text
+    assert "dsh_installer.py" in text
     assert '"install"' in text
     # A reimplementation would parse or write the profile itself.
     for forbidden in ("ConvertFrom-Json", "ConvertFrom-Yaml", "Set-Content", "Out-File", "Add-Content"):
         assert forbidden not in text, f"install.ps1 reimplements {forbidden}"
 
     uninstall = (REPO / "uninstall.ps1").read_text(encoding="utf-8-sig")
-    assert "installer.py" in uninstall
+    assert "dsh_installer.py" in uninstall
     assert '"uninstall"' in uninstall
     assert "ConvertFrom-Json" not in uninstall
 ```
@@ -1187,7 +1187,7 @@ Expected: FAIL — installer 没有 `main()`，退出码非 0 且 stdout 里没�
 
 - [ ] **Step 3: 写实现**
 
-在 `tools/installer.py` 末尾追加：
+在 `tools/dsh_installer.py` 末尾追加：
 
 ```python
 def _add_common_arguments(parser) -> None:
@@ -1272,7 +1272,7 @@ import sys
   把 Manim 可视化解释插件挂到这台 DSH 上。
 
 .DESCRIPTION
-  依赖体检 → 调用 tools\installer.py 做真正的挂载 → 打印结果与重启提示。
+  依赖体检 → 调用 tools\dsh_installer.py 做真正的挂载 → 打印结果与重启提示。
   所有会改文件的逻辑都在 Python 里（可被 pytest 精确断言）；这个脚本只负责
   参数解析、体检和转述，不自己碰 YAML 或 JSON。
 
@@ -1307,7 +1307,7 @@ if (-not $manim)  { Write-Warning "PATH 上没有 manim；安装器会退回 'py
 if (-not $ffmpeg) { Write-Warning "PATH 上没有 ffmpeg；GIF 预览将无法生成（MP4 不受影响）。" }
 
 $arguments = @(
-    (Join-Path $repo "tools\installer.py"), "install",
+    (Join-Path $repo "tools\dsh_installer.py"), "install",
     "--profile-root", $ProfileRoot,
     "--plugin-root",  $PluginRoot,
     "--skill-root",   $SkillRoot,
@@ -1339,7 +1339,7 @@ if ($DryRun) {
   把 Manim 可视化解释插件从这台 DSH 上摘干净。
 
 .DESCRIPTION
-  与 install.ps1 对称：调用 tools\installer.py 还原 cordis.patch.yml 与
+  与 install.ps1 对称：调用 tools\dsh_installer.py 还原 cordis.patch.yml 与
   package.json，删除插件目录与 Skill 副本。默认**保留**已经渲染出的动画
   （它们是用户的产物，不该被卸载脚本删掉）。
 
@@ -1365,7 +1365,7 @@ $python = (Get-Command "python" -ErrorAction SilentlyContinue).Source
 if (-not $python) { throw "找不到 python。" }
 
 $arguments = @(
-    (Join-Path $repo "tools\installer.py"), "uninstall",
+    (Join-Path $repo "tools\dsh_installer.py"), "uninstall",
     "--profile-root", $ProfileRoot,
     "--plugin-root",  $PluginRoot,
     "--skill-root",   $SkillRoot,
@@ -1403,7 +1403,7 @@ Expected: 打印 JSON 计划，`"action": "install"`，退出码 0；`$env:TEMP\
 - [ ] **Step 6: 提交**
 
 ```bash
-git add install.ps1 uninstall.ps1 tools/installer.py tests/test_installer_cli.py
+git add install.ps1 uninstall.ps1 tools/dsh_installer.py tests/test_installer_cli.py
 git commit -m "feat(installer): PowerShell 入口与 --dry-run"
 ```
 
