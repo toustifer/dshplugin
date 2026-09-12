@@ -1,0 +1,36 @@
+Manim Community v0.20.1
+
+<frozen runpy>:128: RuntimeWarning: 'manim.__main__' found in sys.modules after import of package 'manim', but prior to execution of 'manim.__main__'; this may result in unpredictable behaviour
+┌───────────────────── Traceback (most recent call last) ─────────────────────┐
+│ D:\ProgramData\anaconda3\Lib\site-packages\manim\cli\render\commands.py:125 │
+│ in render                                                                   │
+│                                                                             │
+│   122 │   │   │   try:                                                      │
+│   123 │   │   │   │   with tempconfig({}):                                  │
+│   124 │   │   │   │   │   scene = SceneClass()                              │
+│ > 125 │   │   │   │   │   scene.render()                                    │
+│   126 │   │   │   except Exception:                                         │
+│   127 │   │   │   │   error_console.print_exception()                       │
+│   128 │   │   │   │   sys.exit(1)                                           │
+│                                                                             │
+│ D:\ProgramData\anaconda3\Lib\site-packages\manim\scene\scene.py:259 in      │
+│ render                                                                      │
+│                                                                             │
+│    256 │   │   """                                                          │
+│    257 │   │   self.setup()                                                 │
+│    258 │   │   try:                                                         │
+│ >  259 │   │   │   self.construct()                                         │
+│    260 │   │   except EndSceneEarlyException:                               │
+│    261 │   │   │   pass                                                     │
+│    262 │   │   except RerunSceneException:                                  │
+│                                                                             │
+│ D:\myprogram\dshplugin\renders\20260912-153012-a1b2\scene.p                 │
+│ y:6 in construct                                                            │
+│                                                                             │
+│   3 class Demo(Scene):                                                      │
+│   4 │   def construct(self):                                                │
+│   5 │   │   self.add(Circle(radius=1))                                      │
+│ > 6 │   │   self.play(Undefined123())                                       │
+│   7                                                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+NameError: name 'Undefined123' is not defined

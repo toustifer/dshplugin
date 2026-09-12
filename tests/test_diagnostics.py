@@ -48,6 +48,55 @@ def test_parse_prefers_the_scene_file_over_library_frames():
     assert line == 6
 
 
+# --- Manim 0.20.1's default Rich panel -------------------------------------
+# On a real failed render manim does *not* print a plain traceback: rich wraps it
+# in a bordered panel, right-pads every line, and breaks long paths across two
+# lines. None of those lines match the plain `File "...", line N` pattern, so
+# before this regression every genuine failure lost its type, line and hint.
+
+def test_unwrap_panels_drops_borders_and_rejoins_wrapped_lines():
+    code = read("manim_panel_nameerror.txt")
+    plain = diagnostics.unwrap_panels(code)
+    # The panel's own edges go; the `│` inside `122 │   try:` is Manim's source
+    # display and has to survive, so assert on the edges rather than on the glyph.
+    assert not any(
+        line.startswith(("│", "┌", "└")) or line.endswith(("│", "┐", "┘"))
+        for line in plain.splitlines()
+    )
+    assert 'scene.py", line 6, in construct' in plain
+    assert "NameError: name 'Undefined123' is not defined" in plain
+
+
+def test_parse_reads_a_panel_wrapped_traceback():
+    exc_type, message, line = diagnostics.parse_traceback(
+        diagnostics.unwrap_panels(read("manim_panel_nameerror.txt")),
+        SCENE,
+    )
+    assert exc_type == "NameError"
+    assert message == "name 'Undefined123' is not defined"
+    assert line == 6
+
+
+def test_classify_recovers_the_line_and_hint_from_a_panel(tmp_path: Path):
+    scene = tmp_path / "scene.py"
+    scene.write_text(
+        "from manim import *\n"
+        "\n"
+        "class Demo(Scene):\n"
+        "    def construct(self):\n"
+        "        self.add(Circle(radius=1))\n"
+        "        self.play(Undefined123())\n",
+        encoding="utf-8",
+    )
+    raw = read("manim_panel_nameerror.txt").replace(str(SCENE), str(scene))
+    result = diagnostics.classify(raw, scene, stage="manim")
+    assert result.type == "NameError"
+    assert result.message == "name 'Undefined123' is not defined"
+    assert result.line == 6
+    assert result.source_line == "self.play(Undefined123())"
+    assert "from manim import *" in result.hint
+
+
 def test_parse_without_a_scene_frame_falls_back_to_the_last_one():
     raw = (
         "Traceback (most recent call last):\n"

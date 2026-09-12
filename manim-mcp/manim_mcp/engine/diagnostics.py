@@ -19,13 +19,42 @@ PROGRESS_RE = re.compile(
     r"^\s*(?:Rendering\s|Animation\s|Playing\s|\d+%\|).*$", re.MULTILINE
 )
 FRAME_RE = re.compile(
-    r'^\s*File "(?P<file>[^"]+)", line (?P<line>\d+), in (?P<func>.+)$', re.MULTILINE
+    r'^\s*File "(?P<file>[^"]+)",? +line (?P<line>\d+),? +in (?P<func>.+?)\s*$',
+    re.MULTILINE,
+)
+# A rich panel right-pads every line, and the padding collides with the space
+# that follows the comma, so a *wrapped* frame loses that comma entirely:
+#     │ D:\...\scene.p │
+#     │ y:6 in construct │
+# The break lands mid-extension, so the fragment is not a whole character.
+PANEL_FRAME_RE = re.compile(
+    r'^\s*File "(?P<file>[^"]+?)"'
+    r'(?:,? +line (?P<closed_line>\d+),? +in (?P<closed_func>.+?))?'
+    r'(?P<open>: *\d+ +in +.+?)?\s*$'
+)
+# The leading half of a wrapped frame: a path cut mid-extension.
+FRAME_FRAGMENT_RE = re.compile(r"^[A-Za-z]:.+[.\\/][A-Za-z]?$")
+# The trailing half: the rest of the path, then `:NN in func`. The rest of the
+# path here is always exactly one character ("y" from "scene.p" + "y").
+FRAME_CONTINUATION_RE = re.compile(
+    r"^(?P<rest>\S):(?P<line>\d+) +in +(?P<func>\S.*?)\s*$"
+)
+ANCHORED_FRAME_RE = re.compile(
+    r'^File "(?P<file>.+?)":(?P<line>\d+) +in +(?P<func>.+)$'
 )
 EXCEPTION_RE = re.compile(
     r"^(?P<type>[A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception|Exit|Interrupt)?): "
     r"(?P<message>.+)$",
     re.MULTILINE,
 )
+# Manim 0.20.1 does not print a plain traceback: `error_console.print_exception()`
+# draws a rich panel, right-pads every line, and wraps long paths onto a second
+# line. Every frame line therefore fails FRAME_RE unless the panel is undone first.
+PANEL_BORDER_RE = re.compile(r"^[\u2500-\u257F]+$")
+# The panel's top edge is a rule with the title embedded in it, so it is not
+# purely box-drawing characters.
+PANEL_HEADER_RE = re.compile(r"^[\u2500-\u257F]+\s*Traceback.*$")
+PANEL_EDGE_RE = re.compile(r"^[\u2502\u2503]\s?|\s*[\u2502\u2503]$")
 
 DEFAULT_TAIL_CHARS = 4000
 
@@ -73,6 +102,95 @@ def tail(text: str, max_chars: int = DEFAULT_TAIL_CHARS) -> str:
     return f"...[{len(body)} chars truncated]...\n{body[-max_chars:]}"
 
 
+def _frame_parts(line: str) -> dict | None:
+    """Split a frame line into its pieces, tolerating a mid-path wrap.
+
+    Returns `{file, line, func, fragment?}`. A `fragment` means the line holds
+    only half of a wrapped frame; a plain traceback never produces one, so this
+    cannot misfire on clean input.
+    """
+    match = PANEL_FRAME_RE.match(line)
+    if match is not None:
+        file = match.group("file")
+        if match.group("closed_line") is not None:
+            return {
+                "file": file,
+                "line": int(match.group("closed_line")),
+                "func": match.group("closed_func"),
+            }
+        if match.group("open") is not None:
+            number, _, func = match.group("open").lstrip(":").partition(" in ")
+            return {"file": file, "line": int(number.strip()), "func": func.strip()}
+        if FRAME_FRAGMENT_RE.match(file):
+            return {"file": file, "fragment": True}
+        return None
+
+    # No `File "` marker at all: either the leading half of a wrapped frame, or
+    # the trailing half that rich already stripped the marker from.
+    if FRAME_FRAGMENT_RE.match(line):
+        return {"file": line, "fragment": True}
+    continuation = FRAME_CONTINUATION_RE.match(line)
+    if continuation is not None:
+        return {
+            "rest": continuation.group("rest"),
+            "line": int(continuation.group("line")),
+            "func": continuation.group("func"),
+        }
+    return None
+
+
+def _to_frame(line: str) -> tuple[str, int, str] | None:
+    """The (file, line, func) triple of a complete frame line, or None."""
+    # The canonical rewrite is checked first: it is exactly what unwrap_panels
+    # leaves behind, so this stays cheap and unambiguous for already-good input.
+    anchored = ANCHORED_FRAME_RE.match(line)
+    if anchored is not None:
+        return (
+            anchored.group("file"),
+            int(anchored.group("line")),
+            anchored.group("func"),
+        )
+    parts = _frame_parts(line)
+    if parts is None or "fragment" in parts or "rest" in parts:
+        return None
+    return parts["file"], parts["line"], parts["func"]
+
+
+def unwrap_panels(text: str) -> str:
+    """Undo rich's bordered panels so the traceback reads like plain text.
+
+    Two transformations are needed, and both matter: dropping the box-drawing
+    borders, and putting a frame line back together after rich broke it, because
+    the wrapped path does not fit the panel width. `scene.p` + `y:6 in construct`
+    has to become one `File ".../scene.py", line 6, in construct`, or the
+    scene-file frame cannot be recognised at all -- which is exactly what happened
+    to every real failure before this.
+
+    Nothing here guesses from line shapes: a line is only rewritten when it
+    actually parses as a frame, so a plain traceback passes through untouched.
+    """
+    materialised: list[str] = []
+    for raw in (text or "").splitlines():
+        line = PANEL_EDGE_RE.sub("", raw).strip()
+        if PANEL_BORDER_RE.match(line) or PANEL_HEADER_RE.match(line):
+            materialised.append("")
+            continue
+
+        parts = _frame_parts(line)
+        if parts is not None and "rest" in parts and materialised:
+            # The previous line only looked complete because rich padded it and
+            # swallowed the opening `File "`; it is really this frame's front half.
+            previous = _frame_parts(materialised[-1]) if materialised[-1] else None
+            if previous is not None and "fragment" in previous:
+                materialised[-1] = (
+                    f'File "{previous["file"]}{parts["rest"]}", '
+                    f'line {parts["line"]}, in {parts["func"]}'
+                )
+                continue
+        materialised.append(line)
+    return "\n".join(materialised)
+
+
 def parse_traceback(
     text: str, scene_file: str | Path
 ) -> tuple[str | None, str | None, int | None]:
@@ -81,23 +199,31 @@ def parse_traceback(
     Prefers the last frame inside the generated scene over library frames, so the
     reported line is one the model can actually edit.
     """
-    frames = list(FRAME_RE.finditer(text or ""))
+    frames = [
+        (index, frame)
+        for index, frame in enumerate(map(_to_frame, (text or "").splitlines()))
+        if frame
+    ]
     if not frames:
         return None, None, None
 
     wanted = Path(str(scene_file)).name
-    chosen = frames[-1]
-    for frame in frames:
-        if Path(frame.group("file")).name == wanted:
-            chosen = frame
+    chosen_index, chosen = frames[-1]
+    for index, frame in frames:
+        if Path(frame[0]).name == wanted:
+            chosen_index, chosen = index, frame
 
     exc_type: str | None = None
     message: str | None = None
-    match = EXCEPTION_RE.search(text[chosen.end():])
+    # Never anchored to a line start: inside a panel the exception is followed by
+    # the box edge, so it never sits at column 0.
+    match = EXCEPTION_RE.search("\n".join((text or "").splitlines()[chosen_index:]))
+    if match is None:
+        match = EXCEPTION_RE.search(text or "")
     if match:
         exc_type = match.group("type")
         message = match.group("message").strip()
-    return exc_type, message, int(chosen.group("line"))
+    return exc_type, message, chosen[1]
 
 
 def _source_line(scene_file: str | Path, line: int | None) -> str | None:
@@ -161,7 +287,7 @@ def hint_for(exception_type: str | None, message: str | None, blob: str) -> str 
 
 def classify(stderr: str, scene_file: str | Path, stage: str = "manim") -> Diagnostic:
     """One pass from raw stderr to a Diagnostic."""
-    cleaned = strip_noise(stderr)
+    cleaned = unwrap_panels(strip_noise(stderr))
     exc_type, message, line = parse_traceback(cleaned, scene_file)
     return Diagnostic(
         stage=stage,
