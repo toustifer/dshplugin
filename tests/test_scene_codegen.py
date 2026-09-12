@@ -82,16 +82,16 @@ def test_python_literal_never_emits_json_tokens():
 def test_cyclic_diagram_routes_back_edges_around_the_column():
     """A straight centre-to-centre arrow ploughs through every box it passes.
 
-    The diagram template exists to make a process legible, so an edge that is not
-    between neighbours has to leave the column: adjacent edges anchor on the
-    facing box edges, skipping edges bow out to the side.
+    The diagram template exists to make a process legible, so only a single
+    forward hop stays in the column: adjacent edges anchor on the facing box
+    edges, and everything else — backward hops included — bows out to the side.
     """
     code = build("diagram", edges=[{"from": "a", "to": "b"}, {"from": "b", "to": "a"}])
     ast.parse(code)
     assert "path_arc" in code
-    assert "get_bottom" in code  # adjacent forward edge anchors on box edges
-    assert "get_left" in code  # skipping edge bows out around the side
-    assert "abs(step) == 1" in code
+    assert "get_bottom" in code  # the straight forward hop anchors on box edges
+    assert "get_left" in code  # every other hop bows out around the side
+    assert "straight = step == 1" in code
     assert "abs(step) > 1" in code
 
 
@@ -109,7 +109,7 @@ def test_skipping_forward_edge_bows_out_instead_of_going_straight():
     # Forward skip: bow right with a positive arc, anchor off the right edge.
     ast.parse(code)
     assert "step = target_index - source_index" in code
-    assert "abs(step) == 1" in code
+    assert "straight = step == 1" in code
     assert "abs(step) > 1" in code
     assert "start_box.get_right() + RIGHT * 0.6" in code
     assert "end_box.get_right() + RIGHT * 0.6" in code
@@ -129,9 +129,9 @@ def test_skipping_backward_edge_bows_out_the_other_side():
     ast.parse(code)
     assert "start_box.get_left() + LEFT * 0.6" in code
     assert "arc = -1.6" in code
-    # The tag leaves the column rather than sitting on the boxes it passes.
-    assert "edge_right + ARROW_SEPARATION + tag.width / 2" in code
-    assert "edge_left - ARROW_SEPARATION - tag.width / 2" in code
+    # The tag follows the edge out rather than sitting on the boxes it passes.
+    assert "tag.next_to(" in code
+    assert "arrow.point_from_proportion(0.5)" in code
 
 
 def test_horizontal_layout_bows_skipping_edges_over_and_under_the_row():
@@ -157,28 +157,46 @@ def test_diagram_edges_use_the_readable_edge_colour():
     assert "C_GREY" not in arrow_call
 
 
-def test_diagram_labels_clear_the_nodes_and_the_arc_they_annotate():
-    """A bowing arrow leaves the column, so its label has to follow it out.
-
-    Anchoring the tag at `arrow.get_center() + LEFT * 0.95` puts a long CJK label
-    straight back over the boxes the arc was routed around, and the arrow centre
-    on a bowing edge is precisely the empty middle of the curve. A tag anchored on
-    the box centres instead lands on the node text itself.
-    """
+def test_diagram_label_anchors_on_the_bow_apex_not_the_chord_midpoint():
+    """`get_center()` is the chord midpoint, which for a bowed edge is back on the
+    column, on top of the very boxes the edge was routed around. The apex is
+    `point_from_proportion(0.5)`, and the tag hangs off that point."""
     code = build("diagram", edges=[{"from": "a", "to": "b", "label": "是"}])
     ast.parse(code)
     assert "arrow.get_center()" not in code
+    assert "midpoint = (np.array(start) + np.array(end)) / 2" not in code
+    assert "tag.next_to(" in code
+    assert "arrow.point_from_proportion(0.5)" in code
     assert "ARROW_SEPARATION = 0.14" in code
-    # A tag never uses the box centres or the arrow centre: it is placed from the
-    # box outline and its own width instead.
-    assert "tag.width / 2" in code and "tag.height / 2" in code
-    assert "edge_right + ARROW_SEPARATION + tag.width / 2" in code
-    assert "edge_left - ARROW_SEPARATION - tag.width / 2" in code
-    assert "start_box.get_bottom()[1] + end_box.get_top()[1]" in code
 
 
-def test_skipping_edge_label_goes_into_the_row_gap():
-    """A tag is wider than the gap between two boxes, so it sits in a row gap."""
+def test_backward_label_hangs_off_the_column_outline_not_the_apex():
+    """A bow's apex is only ~0.3 units clear of the column.
+
+    That is not enough clearance for a four-character CJK label, so a backward
+    edge's tag is placed from the column's own left outline at the apex's height.
+    """
+    code = build("diagram", edges=[{"from": "b", "to": "a", "label": "回到判定"}])
+    ast.parse(code)
+    assert "column_left - ARROW_SEPARATION - tag.width / 2" in code
+    assert "apex[1]" in code
+
+
+def test_diagram_label_side_follows_the_direction_the_edge_leaves_the_column():
+    """Choosing the side by `forward` alone put a decision's "yes" on its "no" twin.
+
+    A straight adjacent hop and a skipping forward hop are both `forward`, but the
+    first runs down the middle of the column while the second bows right; a
+    backward hop bows left. The side must match where the edge actually went.
+    """
+    code = build("diagram", edges=[{"from": "a", "to": "b", "label": "是"}])
+    ast.parse(code)
+    assert "elif straight or forward:" in code
+    assert "tag.next_to(apex, RIGHT, buff=ARROW_SEPARATION)" in code
+    assert "tag.next_to(apex, UP if forward else DOWN, buff=ARROW_SEPARATION)" in code
+
+
+def test_skipping_edge_label_still_leaves_the_column():
     code = build(
         "diagram",
         nodes=[
@@ -189,13 +207,41 @@ def test_skipping_edge_label_goes_into_the_row_gap():
         edges=[{"from": "a", "to": "c", "label": "否"}],
     )
     ast.parse(code)
-    assert "end_box.get_top()[1] if forward else start_box.get_top()[1]" in code
-    assert "start_box.get_bottom()[1] if forward else end_box.get_bottom()[1]" in code
+    assert "arrow.point_from_proportion(0.5)" in code
+    assert "edge_right + ARROW_SEPARATION" not in code
 
 
 def test_diagram_edges_keep_a_visible_gap_from_the_boxes():
     code = build("diagram", edges=[{"from": "a", "to": "b"}])
-    assert "buff=0.18" in code
+    assert "buff=ARROW_BUFF" in code
+    assert "NODE_GAP = 0.62" in code
+    assert "ARROW_BUFF = 0.06" in code
+
+
+def test_adjacent_diagram_arrow_leaves_a_shaft_the_reader_can_see():
+    """The invariant, not the magic numbers: a visible shaft must survive.
+
+    `Arrow` shortens BOTH ends by `buff`, so an adjacent edge — drawn inside one
+    row gap — collapses into an invisible stub when the gap is only just wider
+    than the two buffers. That regression is invisible to every assertion about
+    individual constants, so this test reasons about the arithmetic instead.
+    """
+    from manim_mcp.scenes import diagram
+
+    shaft = diagram.NODE_GAP - 2 * diagram.ARROW_BUFF
+    assert shaft >= diagram.MIN_VISIBLE_SHAFT, (
+        f"an adjacent arrow would only be {shaft:.2f} units long "
+        f"(gap {diagram.NODE_GAP} - 2 x buff {diagram.ARROW_BUFF})"
+    )
+    # And the tip must not be clamped down to a dot by the length ratio.
+    tip = min(diagram.ARROW_TIP_LENGTH, diagram.ARROW_TIP_RATIO * shaft)
+    assert tip >= 0.15, f"arrow tip would be only {tip:.3f} units"
+
+
+def test_diagram_arrow_declares_a_fixed_tip_length():
+    code = build("diagram", edges=[{"from": "a", "to": "b"}])
+    assert "tip_length=ARROW_TIP_LENGTH" in code
+    assert "max_tip_length_to_length_ratio=ARROW_TIP_RATIO" in code
 
 
 def test_diagram_sizes_boxes_by_rendered_text_width():

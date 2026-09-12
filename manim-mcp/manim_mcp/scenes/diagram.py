@@ -25,6 +25,17 @@ LAYOUTS = ("vertical", "horizontal")
 BOX_HEIGHT = 0.95
 # Minimum gap left between a label and the arrow or box it sits next to.
 ARROW_SEPARATION = 0.14
+# Gap between two rows (or columns) of boxes. An adjacent edge is drawn inside it,
+# so the gap must leave room for a shaft the reader can actually see: `Arrow`
+# shortens BOTH ends by `ARROW_BUFF`, and the tip is clamped to
+# `TIP_RATIO * length`, so a gap that is only just wider than the two buffers
+# collapses the arrow into an invisible stub.
+NODE_GAP = 0.62
+ARROW_BUFF = 0.06
+ARROW_TIP_LENGTH = 0.18
+ARROW_TIP_RATIO = 0.35
+# Shortest shaft that still reads as an arrow at 480p.
+MIN_VISIBLE_SHAFT = 0.4
 
 _TEMPLATE = '''from manim import *
 
@@ -34,6 +45,10 @@ LAYOUT = @@LAYOUT@@
 TITLE = @@TITLE@@
 BOX_HEIGHT = @@BOX_HEIGHT@@
 ARROW_SEPARATION = @@ARROW_SEPARATION@@
+NODE_GAP = @@NODE_GAP@@
+ARROW_BUFF = @@ARROW_BUFF@@
+ARROW_TIP_LENGTH = @@ARROW_TIP_LENGTH@@
+ARROW_TIP_RATIO = @@ARROW_TIP_RATIO@@
 KIND_COLORS = {
     "process": C_BLUE,
     "decision": C_HIGHLIGHT,
@@ -78,9 +93,9 @@ class DiagramScene(Scene):
             index_of[node_id] = position
 
         if LAYOUT == "horizontal":
-            boxes.arrange(RIGHT, buff=1.1)
+            boxes.arrange(RIGHT, buff=NODE_GAP)
         else:
-            boxes.arrange(DOWN, buff=0.55)
+            boxes.arrange(DOWN, buff=NODE_GAP)
         boxes.move_to(ORIGIN)
 
         if TITLE:
@@ -105,12 +120,16 @@ class DiagramScene(Scene):
             # what decides this: `check` -> `out` moves forward and still crosses
             # `recurse`, so "backwards" was the wrong question to ask.
             step = target_index - source_index
-            adjacent = abs(step) == 1
+            # Only a single *forward* hop is drawn straight, inside the row gap.
+            # Everything else leaves the column: a backward hop sharing that line
+            # with its own forward twin reads as one double-headed arrow, and a hop
+            # that skips a row would be drawn across the box in between.
+            straight = step == 1
             skipping = abs(step) > 1
             forward = step > 0
 
             if LAYOUT == "horizontal":
-                if adjacent:
+                if straight:
                     if forward:
                         start = start_box.get_right()
                         end = end_box.get_left()
@@ -131,7 +150,7 @@ class DiagramScene(Scene):
                     end = end_box.get_right()
                     arc = 0.0
             else:
-                if adjacent:
+                if straight:
                     if forward:
                         start = start_box.get_bottom()
                         end = end_box.get_top()
@@ -156,91 +175,41 @@ class DiagramScene(Scene):
                 start,
                 end,
                 path_arc=arc,
-                buff=0.18,
+                buff=ARROW_BUFF,
                 color=C_EDGE,
                 stroke_width=3,
-                max_tip_length_to_length_ratio=0.12,
+                tip_length=ARROW_TIP_LENGTH,
+                max_tip_length_to_length_ratio=ARROW_TIP_RATIO,
             )
             arrows.add(arrow)
             if edge_label:
                 tag = cn(edge_label, NOTE_SIZE - 6, C_HIGHLIGHT)
-                # A label never uses the arrow's own centre: on a bowing edge that
-                # centre is the empty middle of the curve, which is exactly where
-                # the boxes it was routed around still are. Measured facts that
-                # drive the placement below:
-                #   * the straight adjacent arrow runs down the middle of the gap
-                #     between two rows, so a tag anchored on the box centres lands
-                #     on the nodes and on that line;
-                #   * a handful of CJK glyphs is wider than the gap between two
-                #     boxes, so the tag has to leave the column.
-                # Hence: tags sit beside the column at a gap centre, or (for a
-                # skipping edge) inside the gap, just off the bow.
-                midpoint = (np.array(start) + np.array(end)) / 2
-                if not adjacent:
-                    # The row gap is the one band no box occupies: put the tag on
-                    # its far side so neither border is touched.
-                    gap_top = end_box.get_top()[1] if forward else start_box.get_top()[1]
-                    gap_bottom = (
-                        start_box.get_bottom()[1] if forward else end_box.get_bottom()[1]
-                    )
-                    if LAYOUT == "horizontal":
-                        tag.move_to([midpoint[0], (gap_top + gap_bottom) / 2, 0])
-                        tag.shift(
-                            UP * (tag.height / 2 + ARROW_SEPARATION)
-                            if forward
-                            else DOWN * (tag.height / 2 + ARROW_SEPARATION)
-                        )
-                    else:
-                        column_edge = min(
-                            start_box.get_left()[0], end_box.get_left()[0]
-                        )
-                        tag.move_to(
-                            [
-                                column_edge - ARROW_SEPARATION - tag.width / 2,
-                                (gap_top + gap_bottom) / 2,
-                                0,
-                            ]
-                        )
-                        tag.shift(
-                            RIGHT * (tag.width / 2 + ARROW_SEPARATION)
-                            if forward
-                            else UP * (tag.height / 2 + ARROW_SEPARATION)
-                        )
-                elif LAYOUT == "horizontal":
-                    column_top = max(start_box.get_top()[1], end_box.get_top()[1])
-                    column_bottom = min(
-                        start_box.get_bottom()[1], end_box.get_bottom()[1]
-                    )
-                    gap_center = (
-                        (column_top + end_box.get_top()[1]) / 2
-                        if forward
-                        else (column_bottom + end_box.get_bottom()[1]) / 2
-                    )
-                    tag.move_to([midpoint[0], gap_center, 0])
-                    tag.shift(
-                        UP * (tag.height / 2 + ARROW_SEPARATION)
-                        if forward
-                        else DOWN * (tag.height / 2 + ARROW_SEPARATION)
-                    )
-                elif forward:
-                    # Just off the right of the box outline, so the tag touches
-                    # neither the line running down the gap nor the box below.
-                    edge_right = max(start_box.get_right()[0], end_box.get_right()[0])
-                    tag.move_to(
-                        [
-                            edge_right + ARROW_SEPARATION + tag.width / 2,
-                            (start_box.get_bottom()[1] + end_box.get_top()[1]) / 2,
-                            0,
-                        ]
-                    )
+                # Anchor on the arrow's own path rather than on the boxes. The apex
+                # of a bow is `point_from_proportion(0.5)`; `get_center()` is the
+                # midpoint of the *chord*, which for a bowed edge is back on the
+                # column, on top of the very boxes the edge was routed around.
+                #
+                # The side must be the direction the edge actually leaves the
+                # column, which is not the same as `forward`: an adjacent forward
+                # hop is straight, a skipping forward hop bows right, and both
+                # backward shapes bow left. Choosing by `forward` alone is what put
+                # a decision's "yes" tag on its "no" branch.
+                apex = arrow.point_from_proportion(0.5)
+                if LAYOUT == "horizontal":
+                    tag.next_to(apex, UP if forward else DOWN, buff=ARROW_SEPARATION)
+                elif straight or forward:
+                    tag.next_to(apex, RIGHT, buff=ARROW_SEPARATION)
                 else:
-                    # The same, mirrored: this is the loop edge running back up
-                    # the column, and its tag cannot sit on the boxes it links.
-                    edge_left = min(start_box.get_left()[0], end_box.get_left()[0])
+                    # A bow's apex is only ~0.3 units clear of the column, which is
+                    # not enough for a four-character CJK label, so the tag is hung
+                    # off the column's own outline at the apex's height instead.
+                    column_left = min(
+                        start_box.get_left()[0], end_box.get_left()[0]
+                    )
                     tag.move_to(
                         [
-                            edge_left - ARROW_SEPARATION - tag.width / 2,
-                            (start_box.get_top()[1] + end_box.get_bottom()[1]) / 2,
+                            column_left - ARROW_SEPARATION - tag.width / 2,
+                            apex[1],
                             0,
                         ]
                     )
@@ -358,6 +327,10 @@ def build(**kwargs) -> str:
         .replace("@@TITLE@@", _literal(title or ""))
         .replace("@@BOX_HEIGHT@@", _number(BOX_HEIGHT))
         .replace("@@ARROW_SEPARATION@@", _number(ARROW_SEPARATION))
+        .replace("@@NODE_GAP@@", _number(NODE_GAP))
+        .replace("@@ARROW_BUFF@@", _number(ARROW_BUFF))
+        .replace("@@ARROW_TIP_LENGTH@@", _number(ARROW_TIP_LENGTH))
+        .replace("@@ARROW_TIP_RATIO@@", _number(ARROW_TIP_RATIO))
         .replace(
             "@@NODES@@",
             "\n".join(f"    ({_literal(a)}, {_literal(b)}, {_literal(c)})," for a, b, c in nodes),
