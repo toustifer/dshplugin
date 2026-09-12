@@ -6401,6 +6401,8 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 | 3 | Task 4 | `RUN_ID_PATTERN` 固定 4 位 hex + `secrets.token_hex(2)`（16 位熵）。实测同一秒生成 50 个 id 出现碰撞 → **同一秒的两次渲染会覆盖彼此的 run 目录** | `token_hex(4)`（32 位熵），校验放宽为 `[0-9a-f]{4,8}`；新增「同一秒 500 个 id 不重复」的回归测试 |
 | 4 | Task 5 | `save_index` 返回 `Path`，`upsert_run` 返回内存里的 `data`，其 `updatedAt` 是 `None`，与磁盘上的文件不一致 | `save_index` 改为返回**写入的确切 payload**；`upsert_run`/`remove_run` 直接返回它；新增「返回内容与磁盘一致」的断言 |
 | 5 | Task 6 | `hint_for` 只把第 3 个参数（stderr blob）当匹配范围，`latex` 出现在异常 message 里时漏判（`test_hint_for_missing_latex_binary` 直接 TypeError） | 规则改读 `message + blob` 合并后的 haystack |
+| 6 | Task 10 | `graph.py` 用 `json.dumps(list(x_range))` 生成区间字面量，浮点化后输出 `[-4.0, 4.0, 1.0]`，与 `PARAMS` 文档及 `test_default_x_range_is_used_when_absent` / `test_y_range_default_is_emitted` / `test_custom_x_range_is_emitted` 要求的 `[-4, 4, 1]` 不符（3 个测试红） | 新增 `_number` / `_range_literal`，整数值端点去掉 `.0`；`X_RANGE`/`Y_RANGE`/`AREA_RANGE` 统一改用 `_range_literal`（数值校验仍走 float，只修代码生成） |
+| 7 | Task 11 | `test_node_kind_defaults_to_process` 断言 `'("x", "process")' in code`，但按计划的模板输出的是 `(id, label, kind)` 三元组 `("a", "x", "process")`，左括号在 id 之前，该子串永远无法匹配（测试自身写错，非实现错） | 断言改为完整三元组 `'("a", "x", "process")'`，同时钉死 id、label 与默认 kind，比原断言更强 |
 
 以下偏离是**预先设计**的，不属缺陷：Task 9 先建 `graph/diagram/compare` 三个抛 `SceneSpecError` 的占位模块（Task 10–12 替换）；Task 18 先建 `tools/selftest.py` 的 `return 0` 版（Task 19 替换）。
 
