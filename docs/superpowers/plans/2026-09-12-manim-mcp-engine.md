@@ -6390,6 +6390,22 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 
 ---
 
+## 执行期间的偏离记录
+
+按 TDD 执行时发现计划本身的问题，已就地修正。**这些修正优先于上方对应步骤的原文。**
+
+| # | 任务 | 计划原文的问题 | 实际采用的修正 |
+|---|---|---|---|
+| 1 | Task 1 | `tests/test_package.py` 里 `from manim_mcp import config` 引用了 Task 2 才创建的文件，Task 1 无法变绿 | 删掉该 import，Task 1 只断言包可导入与版本号 |
+| 2 | Task 1 | `pytest.ini` 未设 `asyncio_default_fixture_loop_scope`，pytest-asyncio 每次输出 DeprecationWarning，违反「输出必须干净」 | 加上 `asyncio_default_fixture_loop_scope = function` |
+| 3 | Task 4 | `RUN_ID_PATTERN` 固定 4 位 hex + `secrets.token_hex(2)`（16 位熵）。实测同一秒生成 50 个 id 出现碰撞 → **同一秒的两次渲染会覆盖彼此的 run 目录** | `token_hex(4)`（32 位熵），校验放宽为 `[0-9a-f]{4,8}`；新增「同一秒 500 个 id 不重复」的回归测试 |
+| 4 | Task 5 | `save_index` 返回 `Path`，`upsert_run` 返回内存里的 `data`，其 `updatedAt` 是 `None`，与磁盘上的文件不一致 | `save_index` 改为返回**写入的确切 payload**；`upsert_run`/`remove_run` 直接返回它；新增「返回内容与磁盘一致」的断言 |
+| 5 | Task 6 | `hint_for` 只把第 3 个参数（stderr blob）当匹配范围，`latex` 出现在异常 message 里时漏判（`test_hint_for_missing_latex_binary` 直接 TypeError） | 规则改读 `message + blob` 合并后的 haystack |
+
+以下偏离是**预先设计**的，不属缺陷：Task 9 先建 `graph/diagram/compare` 三个抛 `SceneSpecError` 的占位模块（Task 10–12 替换）；Task 18 先建 `tools/selftest.py` 的 `return 0` 版（Task 19 替换）。
+
+---
+
 ## 完成判据
 
 Plan 1 完成的定义：
