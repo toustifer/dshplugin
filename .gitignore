@@ -1,0 +1,13 @@
+# 渲染产物（可随时清空重建）
+renders/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 本地机器相关配置（install.ps1 生成，不入库）
+*.local.json
+
+# 探针/临时
+.probe/
