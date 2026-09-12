@@ -104,15 +104,35 @@ def render_scene(
     flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
 
     started = time.monotonic()
-    process = spawn(
-        argv,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        creationflags=flags,
-    )
+    try:
+        process = spawn(
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=flags,
+        )
+    except OSError as error:
+        # A pinned-but-missing binary is a realistic failure (install.ps1 writes
+        # absolute paths, and the user can move Python or Manim afterwards). A
+        # traceback escaping here would reach the model as an unactionable crash.
+        return RenderResult(
+            ok=False,
+            mp4=None,
+            seconds=time.monotonic() - started,
+            diagnostic=diagnostics.Diagnostic(
+                stage="manim",
+                type=type(error).__name__,
+                message=f"无法启动 Manim 进程：{error}",
+                hint=(
+                    "Manim 可执行文件不存在或不可执行。检查 MANIM_MCP_MANIM 与 "
+                    "MANIM_MCP_PYTHON 指向的路径是否正确，或重新运行 install.ps1 "
+                    "重新探测绝对路径。"
+                ),
+            ),
+        )
 
     timed_out = False
     stderr = ""

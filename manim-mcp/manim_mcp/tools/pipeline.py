@@ -75,15 +75,26 @@ def execute(
         )
         return envelope.content_blocks(payload)
 
+    # The preview is a secondary artifact. ffmpeg may be configured but no longer
+    # present (install.ps1 pins absolute paths; the user can move or uninstall it),
+    # and every ffmpeg invocation raises FileNotFoundError in that case — so the
+    # whole step is guarded, not just the parts we happen to call directly.
     do_preview = preview_fn or postprocess.build_preview
-    preview = do_preview(
-        cfg.ffmpeg,
-        outcome.mp4,
-        paths.out,
-        scene_class,
-        target_bytes=cfg.gif_target_bytes,
-        max_bytes=cfg.gif_max_bytes,
-    )
+    try:
+        preview = do_preview(
+            cfg.ffmpeg,
+            outcome.mp4,
+            paths.out,
+            scene_class,
+            target_bytes=cfg.gif_target_bytes,
+            max_bytes=cfg.gif_max_bytes,
+        )
+    except Exception as error:  # noqa: BLE001 - a preview fault must not lose the render
+        warnings.append(
+            f"预览生成失败（动画本身已产出，不影响 MP4 产物）："
+            f"{type(error).__name__}: {error}"
+        )
+        preview = postprocess.Preview(path=None, kind=None, byte_size=0)
     warnings.extend(preview.warnings)
 
     duration = 0.0

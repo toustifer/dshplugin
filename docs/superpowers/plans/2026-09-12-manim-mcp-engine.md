@@ -6409,6 +6409,9 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 | 11 | Task 14 | `check.py` 用字面量 `IMPORT_HINT not in code` 判断是否导入了 manim，于是 `import manim` + `class Demo(manim.Scene)` 这种**完全能渲染**的代码被判为「缺少 import」，`test_qualified_scene_base_is_recognised` 的 `ok is True` 无法满足（实现错，非测试错——该测试的意图正是「限定名基类应被识别」） | `check.py` 新增 AST 版 `_imports_manim()`：`import manim` / `import manim.*` / `from manim[.*] import ...` 都算已导入；issue 文案仍含 `from manim import *`，故 `test_missing_manim_import_is_reported` 不受影响 |
 | 12 | Task 16 | `execute()` 无条件调用 `postprocess.probe_duration(cfg.ffmpeg, ...)`。`cfg.ffmpeg` 非空但该二进制不存在时（测试配置里就是假路径）`subprocess.run` 抛 `FileNotFoundError`，把一个已经成功的渲染变成未捕获异常——12 个 pipeline 测试全部红（实现错，且违反本文件自己写下的「次要步骤失败只降级为 warning」） | 时长探测包 `try/except`，失败降级为一条 warning 而不是抛出；**不改 `engine/postprocess.py`**（该模块已有测试且契约是「ffmpeg 说不出来就返回 0.0」，此处补的是调用侧的容错） |
 | 13 | Task 13 / 14 / 17 | Step 4 的 `Expected: PASS（N passed）` 与计划自己给出的测试代码数量不符：Task 13 写 14（实际 13 个测试）、Task 14 写 16（实际 18 个）、Task 17 写 19（实际 17 个）。Task 15（12）与 Task 16（14）计数正确 | 以计划正文的测试代码为准执行，不为了让数字对上而增删断言；实际结果为 Task 13 = 13、Task 14 = 18、Task 17 = 17 |
+| 14 | Task 16 / 8 | **审查发现的「修了一半」**：第 12 条只给直接调用的 `probe_duration` 加了 `try`，但同一个 `execute()` 里 `build_preview(...)` 同样会执行 ffmpeg，`cfg.ffmpeg` 指向不存在的文件时依然抛 `FileNotFoundError` 逃出工具。同理 `engine/render.py` 的 `spawn(...)` 在 `MANIM_MCP_MANIM` / `MANIM_MCP_PYTHON` 指向不存在的可执行文件时也抛 `FileNotFoundError` | `pipeline` 把**整个预览步骤**包进 `try/except`，失败降级为 warning + 空 `Preview`；`render_scene` 把 `spawn` 包进 `except OSError`，返回带可执行提示的 `Diagnostic`（`stage="manim"`，hint 指明检查 `MANIM_MCP_MANIM` / `MANIM_MCP_PYTHON`）。新增 3 个回归测试 |
+
+> 第 14 条的教训：容器类修复要**按「谁会执行外部程序」找齐调用点**，而不是只修被测试直接打到的那一处。`cfg.ffmpeg`/`cfg.manim`/`cfg.python` 都是 install 脚本写入的绝对路径，任何一个变陈旧都会触发同一类崩溃。
 
 **新增的验收工具**：`tests/manual/render_templates.py` —— 用真机 Manim 把四个模板（外加参数滑动的 graph）各渲染一次。第 8/9/10 条缺陷全是它发现的，而单元测试**全都漏掉了**。**改动 `manim_mcp/scenes/` 之后必须跑它。**
 

@@ -153,3 +153,17 @@ def test_webp_preview_is_advertised_with_its_own_extension(tmp_path: Path):
 def test_poster_only_preview_points_markdown_at_the_png(tmp_path: Path):
     payload = text_of(run(tmp_path, preview_fn=stub_preview("png")))
     assert payload["previewMarkdown"].endswith(".png)")
+
+
+def test_configured_but_absent_ffmpeg_degrades_to_a_warning(tmp_path: Path):
+    """`cfg.ffmpeg` set to a path that no longer exists must not lose a good render.
+
+    This is a realistic failure: install.ps1 pins absolute paths, and the user may
+    later move or uninstall ffmpeg. The preview is a secondary step, so it becomes
+    a warning rather than an exception escaping the tool.
+    """
+    cfg = make_config(tmp_path, ffmpeg=r"D:\definitely\not\here\ffmpeg.exe")
+    payload = text_of(run(tmp_path, cfg=cfg, preview_fn=None))
+    assert payload["ok"] is True
+    assert payload["previewMarkdown"] is None
+    assert any("预览" in note for note in payload["warnings"])

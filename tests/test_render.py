@@ -224,3 +224,33 @@ def test_artifact_search_ignores_a_different_scene(tmp_path: Path):
     base.mkdir(parents=True)
     (base / "Other.mp4").write_bytes(b"mp4")
     assert render.find_output_mp4(tmp_path, "S") is None
+
+
+def test_unlaunchable_manim_binary_is_a_structured_failure(tmp_path: Path):
+    """A pinned-but-missing binary must produce a diagnostic, not a traceback.
+
+    install.ps1 pins absolute paths, so a stale MANIM_MCP_MANIM is realistic, and
+    a traceback escaping the tool tells the model nothing it can act on.
+    """
+    paths = make_run(tmp_path)
+    cfg = make_config(manim=r"D:\definitely\not\here\manim.exe")
+
+    result = render.render_scene(cfg, paths, "S", "draft")
+
+    assert result.ok is False
+    assert result.mp4 is None
+    assert result.diagnostic is not None
+    assert result.diagnostic.stage == "manim"
+    assert "MANIM_MCP_MANIM" in (result.diagnostic.hint or "")
+
+
+def test_unlaunchable_python_interpreter_is_a_structured_failure(tmp_path: Path):
+    """The `-m manim` fallback spawns the interpreter, which can also be stale."""
+    paths = make_run(tmp_path)
+    cfg = make_config(manim=None, python=r"D:\definitely\not\here\python.exe")
+
+    result = render.render_scene(cfg, paths, "S", "draft")
+
+    assert result.ok is False
+    assert result.diagnostic is not None
+    assert "MANIM_MCP_PYTHON" in (result.diagnostic.hint or "")
