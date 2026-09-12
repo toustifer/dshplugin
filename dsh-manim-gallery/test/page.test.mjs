@@ -236,7 +236,7 @@ test("apply reads the services off the declared context properties", () => {
 	plugin.apply(ctx);
 
 	assert.deepEqual(asked, [], "the services must come from the declared properties");
-	assert.equal(registrations.length, 3);
+	assert.equal(registrations.length, 1);
 
 	// And the page it built really does carry the action.
 	const main = registrations.find((r) => r.options.name === "main");
@@ -254,7 +254,7 @@ test("galleryActions gains openInRightbar only when the service is mounted", () 
 	assert.equal(typeof withService.openInRightbar, "function");
 });
 
-test("apply registers three working components", () => {
+test("apply registers one working component", () => {
 	// `sidebarRight` and `layout` are declared dependencies, so Cordis does not call
 	// `apply` at all until they exist — there is no "service missing" state left to
 	// degrade into.
@@ -263,26 +263,21 @@ test("apply registers three working components", () => {
 	});
 	plugin.apply(ctx);
 
-	assert.equal(registrations.length, 3);
+	assert.equal(registrations.length, 1);
 	for (const entry of registrations) {
 		assert.equal(typeof entry.component, "function", entry.options.name);
 	}
 });
 
-test("the header entry opens the gallery panel", () => {
+test("the header button opens the gallery panel when it is wired up", () => {
+	// The button is no longer registered (see `apply`), but it is kept built and
+	// tested so restoring the door is a one-line change. Exercise it through the
+	// internals rather than through a registration that no longer exists.
 	const selected = [];
-	const { ctx, registrations } = createCtx({
-		services: {
-			layout: { selectPanel: (id) => selected.push(id) },
-			sidebarRight: { openResource() {} },
-		},
+	const button = plugin.__internals.makeHeaderButton({
+		layout: { selectPanel: (id) => selected.push(id) },
 	});
-	plugin.apply(ctx);
-
-	const header = registrations.find(
-		(r) => r.options.name === "conversation.session.header.utilities"
-	);
-	const tree = header.component({});
+	const tree = button({});
 	assert.equal(typeof tree.props.onClick, "function");
 	tree.props.onClick();
 	assert.deepEqual(selected, ["manim-gallery"]);

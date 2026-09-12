@@ -20,32 +20,34 @@ test("the plugin declares the services it reaches as context properties", () => 
 	assert.equal(typeof plugin.apply, "function");
 });
 
-test("apply registers the panel icon, the matching main panel, and a header entry", () => {
+test("apply registers only the main panel, and neither visible door", () => {
+	// The left rail icon (`sidebar.panellist`) and the Session header button
+	// (`conversation.session.header.utilities`) were removed on request once the
+	// animation started arriving embedded in the answer body. This asserts the
+	// absence, not just the presence: re-adding a `register` call without meaning to
+	// is exactly the regression worth catching, because it puts a permanent button
+	// back into every conversation.
 	const { plugin } = loadClient();
 	const { ctx, registrations } = createCtx();
 	plugin.apply(ctx);
 
-	assert.equal(registrations.length, 3);
-
-	const icon = registrations.find((r) => r.options.name === "sidebar.panellist");
-	const page = registrations.find((r) => r.options.name === "main");
-	const header = registrations.find(
-		(r) => r.options.name === "conversation.session.header.utilities"
+	assert.deepEqual(
+		registrations.map((r) => r.options.name),
+		["main"]
 	);
-	assert.ok(icon, "sidebar.panellist was not registered");
-	assert.ok(page, "main was not registered");
-	assert.ok(header, "the header entry was not registered");
 
-	// The sidebar resolves the button from list metadata, and that same id is what
-	// the layout dispatches into `main` — the two must be one string.
-	assert.equal(icon.options.id, "manim-gallery");
+	const page = registrations[0];
 	assert.equal(page.options.key, "manim-gallery");
-	assert.equal(icon.options.label, "动画库");
-	assert.ok(Number.isFinite(icon.options.order));
+	// `main` is dispatched by the panel id, so the key must stay that literal string.
+	assert.equal(typeof page.component, "function");
+});
 
-	// The header entry is a second door to the same panel, so it carries the same id
-	// and a label the owner can project.
-	assert.equal(header.options.id, "manim-gallery");
-	assert.equal(header.options.label, "动画库");
-	assert.ok(Number.isFinite(header.options.order));
+test("the removed doors still exist as tested components, ready to be re-registered", () => {
+	// Removing the registrations is a UI decision, not a deletion: `IconCell` and
+	// `makeHeaderButton` stay built and exercised so that restoring either door is one
+	// `ctx.slots.register(...)` call.
+	const { plugin } = loadClient();
+	assert.equal(typeof plugin.__internals.IconCell, "function");
+	assert.equal(typeof plugin.__internals.makeHeaderButton, "function");
+	assert.equal(typeof plugin.__internals.openGalleryPanel, "function");
 });

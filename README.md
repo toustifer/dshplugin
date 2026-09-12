@@ -7,7 +7,7 @@
 | 组件 | 目录 | 职责 |
 |---|---|---|
 | **渲染引擎** | `manim-mcp/` | 一个 stdio MCP 服务，向模型暴露 8 个工具：4 个声明式模板（公式推导 / 函数图像 / 流程结构 / 左右对照）、1 个任意代码逃生口、以及 `check` / `style_guide` / `runs`。负责把模板编译成 Manim 源码、调用 Manim 渲染、后处理成 GIF/WebP/PNG 预览、把失败解析成带行号与修法的结构化诊断。 |
-| **动画库面板** | `dsh-manim-gallery/` | 一个 DSH 原生插件，在左侧栏加一个常驻的「动画库」图标，点开是全尺寸中央页面：网格预览全部历史动画、搜索筛选排序、点开用 `<video controls>` 看 MP4。**只读**。 |
+| **动画库面板** | `dsh-manim-gallery/` | 一个 DSH 原生插件，提供全尺寸中央页面：网格预览全部历史动画、搜索筛选排序、点开用 `<video controls>` 看 MP4。**只读**。**当前没有入口**——左侧栏图标与会话头部按钮已按要求移除，因为动画现在直接内嵌在回答正文里；页面、图标、按钮都仍在且仍被测试，恢复入口只需在 `apply` 里加回一次 `ctx.slots.register(...)`。 |
 | **行为层** | `skills/manim-explainer/SKILL.md` | 教会模型：什么时候画、选哪个工具、画砸了怎么自愈、以及硬性要求（非空时必须原样贴 `previewMarkdown`、图前后各一句点明关系、一轮最多一张）。 |
 
 产物落在 `renders/`，每条 run 一个目录，含 `scene.py`（可复现可再编辑）、`out/`（mp4/gif/png）、`run.json`；根部的 `renders/index.json` 是面板的数据源。
@@ -54,7 +54,7 @@ cd D:\myprogram\dshplugin
 & "$HOME\.dsh\restart-web.ps1"
 ```
 
-重启后应该看到：左侧栏多出一个「动画库」图标；新开一个会话问「为什么 e^{iπ} + 1 = 0」这类问题时，回答里会内嵌一段会动的图。
+重启后应该看到：问一个值得画的问题（「为什么 e^{iπ} + 1 = 0」这类），回答正文里会内嵌一段会动的图。
 
 ## 卸载
 
@@ -136,8 +136,8 @@ D:\ProgramData\anaconda3\python.exe tests\manual\export_last_frames.py   # 导�
 |---|---|
 | 对话里不出动画 | 先跑 `manim-mcp\server.py --selftest`，它会把依赖与渲染链一次性验完并给出退出码 |
 | 工具列表里没有 `mcp__manim__*` | `failOnStartupError: true` 会让 MCP 启动失败显式暴露。看 dsh 启动日志里的 `mcp-client(manim)` |
-| 左侧栏没有「动画库」图标 | profile 的 `dsh.profile.bundles`、`node_modules` 符号链接、以及有没有重启 web |
-| 面板显示「读不到动画库」 | 面板会显示它**尝试读取的绝对路径**。核对它与 MCP 的 `MANIM_MCP_RENDER_ROOT` 是否一致 |
+| 图片位置是空的/裂图 | 跑 `node tests\manual\probe_file_api.mjs`。它对运行中的 Host 实测那条引用，能直接区分「路径形式不对」「`fs-sandbox.cwd` 没钉在同一个盘符」「产物被删了」「鉴权没带上」 |
+| 面板能打开但读不到数据 | 面板会显示它**尝试读取的绝对路径**。核对它与 MCP 的 `MANIM_MCP_RENDER_ROOT` 是否一致 |
 | 缩略图空白 | 在**已登录的浏览器**里打开 `/api/file?path=…`。401 = 鉴权没带上；404 = 产物被删了 |
 | 公式渲染报错 | `where latex`；MiKTeX 首次编译宏包很慢，冷启动一次约 35 秒 |
 | 中文变成方框 | `manim-mcp\manim_mcp\style.py` 的字体探测；`style_guide` 工具会把本机可用字体名列出来 |

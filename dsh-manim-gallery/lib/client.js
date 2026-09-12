@@ -660,28 +660,18 @@ window.__ModuleLoader__.load({
 			const services = { layout: ctx.layout, sidebarRight: ctx.sidebarRight };
 			publishProbe(services);
 
-			ctx.slots.inject("sidebar.panellist", () =>
-				ctx.slots.register(
-					{ name: "sidebar.panellist", id: PANEL_ID, order: 40, label: "动画库" },
-					IconCell
-				)
-			);
+			// The two visible doors are deliberately NOT registered any more:
+			// `sidebar.panellist` (the left rail's icon) and
+			// `conversation.session.header.utilities` (the Session header's
+			// right-aligned button). The animation now reaches the reader embedded in
+			// the answer body itself — see `envelope.preview_markdown` in the engine —
+			// so a permanently visible gallery entry is clutter rather than access.
+			//
+			// `main` stays registered and the page, the icon, and the header button all
+			// still exist and are tested, so restoring either door is one
+			// `ctx.slots.register(...)` call and nothing else.
 			ctx.slots.inject("main", () =>
 				ctx.slots.register({ name: "main", key: PANEL_ID }, makeGalleryPage(services))
-			);
-			// A second door, in the Session header's right-aligned utilities beside the
-			// shipped ones: the sidebar entry is the discoverable one, and this is the
-			// one that stays in sight while reading an answer.
-			ctx.slots.inject("conversation.session.header.utilities", () =>
-				ctx.slots.register(
-					{
-						name: "conversation.session.header.utilities",
-						id: PANEL_ID,
-						order: 10,
-						label: "动画库",
-					},
-					makeHeaderButton(services)
-				)
 			);
 		}
 
