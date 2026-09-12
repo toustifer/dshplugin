@@ -6424,6 +6424,11 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 
 > 第 16 条的教训与第 8 条同源：**单元测试的 fixture 是手写的，真机输出不是。** 第 8 条是「`ast.parse` 通过 ≠ 能 import」，这条是「普通 traceback 能解析 ≠ 真机能解析」。凡是解析**外部程序输出**的代码，fixture 必须来自真机原文，且 Task 20 的目视验收/端到端验收不能省。
 
+| 18 | Task 20（完成判据 2/4 的真机复验） | **最严重的一条：服务端一旦被当作真正的 MCP 子进程启动，所有渲染类工具调用都会卡死到 180 秒超时，产物目录全空、stderr 全空。** 根因：`engine/render.py` 的 `Popen` 与 `engine/postprocess.py` 的 `subprocess.run` 都没有指定 `stdin`，于是子进程**继承了 MCP 的 stdin**——那是客户端持有的、整个会话都不关闭的 JSON-RPC 管道。manim（或它拉起的 LaTeX 助手）一读 stdin 就永久阻塞。这条路径的可怕之处在于它**只在真实部署形态下出现**：直接 `python -m manim`、`server.py --selftest`、in-process `Client(build_server(cfg))`、甚至 `asyncio.to_thread` 里跑 `render_scene` **全都正常**（9 秒），只有「stdio 服务端 + 工具调用」才复现 | `render.render_scene` 的 `Popen` 与 `postprocess._run` 的 `subprocess.run` 都加上 `stdin=subprocess.DEVNULL`。新增两个回归测试钉死这个 kwarg（`test_manim_never_inherits_our_stdin` / `test_ffmpeg_never_inherits_our_stdin`）；新增 `tests/manual/acceptance_tools.py`：**经真实 stdio 服务端**依次调用四个声明式工具，校验 `assets` 三项产物真实存在、`previewMarkdown` 形状正确、`previewBytes > 0`、恰好一个 image 块，并核对 `renders/index.json` 收录了这几次 run |
+| 19 | Task 20 | 计划 Step 3 说「对每个模板跑一次真实渲染……`renders/index.json` 有 4 条记录」，但被指定复用的 `tests/manual/render_templates.py` **直接调用 `scenes.build` + `subprocess.run`，完全绕开 pipeline**，因此它既不写 `run.json` 也不写 `index.json`（实测 `renders/index.json` 根本不存在）。单靠该脚本无法满足该步骤的后半句 | 保留 `render_templates.py` 作为**模板层**验收（用户已指定直接复用，实测 5 ok、0 failed），另加 `tests/manual/acceptance_tools.py` 作为**工具层**验收，由后者产生 `render.json` / `index.json` 记录 |
+
+> 第 18 条的教训与前两条同源，但更隐蔽：**「本地能跑」不等于「部署形态能跑」。** 前面的证据链（直接调用、in-process、`to_thread`、stdin/stdout/stderr 各种重定向组合、嵌套 spawn）**每一项都通过**，唯一失败的是「FastMCP stdio 服务端 + 工具调用」这一种组合——而它恰好就是生产路径。凡是给外部程序当父进程的代码，都必须显式指定 `stdin`，不能让它继承一个自己不了解的句柄。
+
 以下偏离是**预先设计**的，不属缺陷：Task 9 先建 `graph/diagram/compare` 三个抛 `SceneSpecError` 的占位模块（Task 10–12 替换）；Task 18 先建 `tools/selftest.py` 的 `return 0` 版（Task 19 替换）。
 
 ---
