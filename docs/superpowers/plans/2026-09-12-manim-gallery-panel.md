@@ -1511,6 +1511,23 @@ git commit -m "docs(manim-gallery): 组件说明、数据通路与只读边界"
 
 ---
 
+## 执行期间的偏离记录
+
+按 TDD 执行时发现计划本身的问题，已就地修正。**这些修正优先于上方对应步骤的原文。**
+
+| # | 任务 | 计划原文的问题 | 实际采用的修正 |
+|---|---|---|---|
+| 1 | 全部 | `node --test test/`（带尾斜杠）在 **Node 22 下被当成模块路径**，报 `Cannot find module '...\test'`；四种写法实测只有 glob 与显式文件可用 | 全部改为 `node --test "test/*.test.mjs"`（已验证），`package.json` 的 test 脚本同步改 |
+| 2 | Task 3 | `test("the detail view offers a way back and a way to copy the path")` 断言 `el.props.onClick === acts.copyPath`。但详情页的复制按钮是 `() => actions.copyPath(target)` 这个**箭头包装**，与 `acts.copyPath` 永不相等（实现错：测试写错了比较对象） | 复制按钮加独立的 `manim-gallery__copy` 类名，测试按类名找到它、**调用它**、再断言 `copyPath` 收到了 MP4 路径——比原来的身份比较更强 |
+| 3 | Task 3 | `test("the detail view shows the metadata a reader would ask for")` 断言正文含 `/equation/`，但元信息里只渲染了**中文标签**「公式推导」（`TOOL_LABELS` 映射后），原始工具名 `equation` 从未出现 | 详情页增加一项 `fact("工具", run.tool)`（原始 id 对排查也有用），两种形式都断言 |
+| 4 | Task 4 | `react.useEffect(() => { load(); })` 不返回 promise，所以 `await effect.fn()` **在 fetch 完成前就返回**，三条断言全部读到 `phase: "loading"`。而 effect 也不能返回那个 promise——React 会把返回值当成清理函数 | 把加载状态机抽成独立的 `loadInto(setState)`（与 `galleryView` 同样的分解思路）；测试用**自己的 recorder** 直接 await 它，另有一条测试证明 effect 确实启动了加载 |
+| 5 | Task 3 / 4 | 计划把 Task 3 与 Task 4 安排为两次提交 | 实际合并为一次（`40f8bca`）。视图层与接线在同一文件里交替改动，拆开会让中间提交短暂不可用 |
+| 6 | Task 5 | 计划给了 4 条样式测试 | 增加第 5 条 `apply injects the stylesheet`：前 4 条只测 `ensureStyle` 自己，没有一条证明 `apply` 真的调了它 |
+
+**执行结果**：53 个离线测试全绿（计划预期 42 + 4 = 46，多出的 7 条来自上表第 2/3/4/6 条的修正与加强），`lib/client.js` 零硬编码颜色、零写请求。
+
+
+
 ## 完成判据
 
 Plan 2 完成的定义：
