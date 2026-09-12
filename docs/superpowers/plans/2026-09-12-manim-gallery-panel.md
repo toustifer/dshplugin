@@ -261,7 +261,7 @@ test("apply registers a global panel icon and a matching main panel", () => {
 
 - [ ] **Step 3: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"`
 Expected: FAIL — `ENOENT: no such file or directory, open '...\lib\client.js'`
 
 - [ ] **Step 4: 写最小实现**
@@ -294,7 +294,7 @@ Expected: FAIL — `ENOENT: no such file or directory, open '...\lib\client.js'`
     }
   },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test "test/*.test.mjs""
   },
   "license": "MIT",
   "peerDependencies": {
@@ -373,7 +373,7 @@ window.__ModuleLoader__.load({
 
 - [ ] **Step 5: 运行测试确认通过**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"`
 Expected: PASS（3 passed）
 
 - [ ] **Step 6: 提交**
@@ -556,7 +556,7 @@ test("loadIndex tolerates a missing updatedAt", async () => {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/pure.test.mjs`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"pure.test.mjs`
 Expected: FAIL — `TypeError: Cannot destructure property 'RENDER_ROOT' of 'plugin.__internals' as it is undefined`
 
 - [ ] **Step 3: 写实现**
@@ -664,7 +664,7 @@ Expected: FAIL — `TypeError: Cannot destructure property 'RENDER_ROOT' of 'plu
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"`
 Expected: PASS（3 + 21 passed）
 
 - [ ] **Step 5: 提交**
@@ -871,7 +871,7 @@ function actions() {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/view.test.mjs`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"view.test.mjs`
 Expected: FAIL — `TypeError: galleryView is not a function`
 
 - [ ] **Step 3: 写实现**
@@ -1132,7 +1132,7 @@ Expected: FAIL — `TypeError: galleryView is not a function`
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"`
 Expected: PASS（24 + 14 passed）
 
 - [ ] **Step 5: 提交**
@@ -1258,7 +1258,7 @@ test("copyToClipboard swallows a rejected write", async () => {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/page.test.mjs`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"page.test.mjs`
 Expected: FAIL — `TypeError: copyToClipboard is not a function`
 
 - [ ] **Step 3: 写实现**
@@ -1347,7 +1347,7 @@ Expected: FAIL — `TypeError: copyToClipboard is not a function`
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"`
 Expected: PASS（38 + 4 passed）
 
 - [ ] **Step 5: 提交**
@@ -1413,7 +1413,7 @@ test("ensureStyle is a no-op without a document", () => {
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/style.test.mjs`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"style.test.mjs`
 Expected: FAIL — `TypeError: ensureStyle is not a function`
 
 - [ ] **Step 3: 写实现**
@@ -1473,7 +1473,7 @@ Expected: FAIL — `TypeError: ensureStyle is not a function`
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test test/`
+Run: `cd D:\myprogram\dshplugin\dsh-manim-gallery; node --test "test/*.test.mjs"`
 Expected: PASS（42 + 4 passed）
 
 - [ ] **Step 5: 提交**
@@ -1500,7 +1500,7 @@ git commit -m "feat(manim-gallery): 面板样式（全部走 --dsw-* 主题 toke
 4. **`RENDER_ROOT` 由 install.ps1 改写**：指出 `lib/client.js` 里那一行与其形状约定。
 5. **只读边界（必须写清楚，这是有意的设计决定）**：面板不做删除、不做重渲染。原因是手写打包插件没有 client→host 调用通道（client→host 走 Typert Gateway 生成的 Remote 贡献，需要完整 TS 构建管线），所以任何写操作改由 MCP 侧的 `runs` 工具承担。面板只提供「复制路径」。
 6. **排错**：面板不出现 → 检查 profile 的 bundles 与 `node_modules` 链接；面板显示「读不到动画库」→ 检查 `RENDER_ROOT` 与 `index.json` 是否存在；缩略图空白 → 用浏览器直接打开打印出的 `/api/file?path=…` 看是否 401。
-7. **测试**：`node --test test/` 的作用与它 mock 了什么。
+7. **测试**：`node --test "test/*.test.mjs"` 的作用与它 mock 了什么。
 
 - [ ] **Step 2: 提交**
 
@@ -1515,7 +1515,7 @@ git commit -m "docs(manim-gallery): 组件说明、数据通路与只读边界"
 
 Plan 2 完成的定义：
 
-1. `cd dsh-manim-gallery; node --test test/` 全绿，0 failed。
+1. `cd dsh-manim-gallery; node --test "test/*.test.mjs"` 全绿，0 failed。
 2. `lib/client.js` 里没有一行硬编码颜色（只有 `--dsw-*` token）。
 3. 离线 harness 能证明：模块以 `dsh-manim-gallery` 注册、`inject` 只要 `slots`、`apply` 注册了 `sidebar.panellist{id:"manim-gallery"}` 与 `main{key:"manim-gallery"}`。
 4. `galleryView` 的四种状态（loading/empty/error/ready）与详情视图都有断言覆盖。
