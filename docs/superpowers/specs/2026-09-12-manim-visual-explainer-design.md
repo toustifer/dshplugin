@@ -134,29 +134,33 @@ D:\myprogram\dshplugin\
 ├─ install.ps1                        幂等安装（依赖体检 + 配置挂载 + Skill 安装）
 ├─ uninstall.ps1                      幂等卸载与回滚
 ├─ manim-mcp\
-│  ├─ server.py                       FastMCP(stdio) 入口，注册 8 个工具
-│  ├─ config.py                       配置解析（env 优先，其次自动探测，最后默认值）
-│  ├─ style.py                        3b1b 配色/字号/节奏常量 + 中文字体探测
-│  ├─ engine\
-│  │  ├─ __init__.py
-│  │  ├─ workspace.py                 run 目录生命周期、命名、保留与清理
-│  │  ├─ index.py                     维护 renders\index.json（动画库数据源）
-│  │  ├─ render.py                    写 scene.py → 调 manim 子进程 → 收产物
-│  │  ├─ postprocess.py               MP4 → GIF/WebP/PNG 与体积控制链
-│  │  └─ diagnostics.py               stderr/traceback → 结构化错误 + 修复提示
-│  ├─ scenes\                         4 个高层模板的 Manim 代码生成器
-│  │  ├─ __init__.py                  模板注册表
-│  │  ├─ equation.py
-│  │  ├─ graph.py
-│  │  ├─ diagram.py
-│  │  └─ compare.py
-│  └─ tools\                          每个 MCP 工具的实现
+│  ├─ server.py                       stdio 启动器（把本目录加入 sys.path 后调用 manim_mcp.app）
+│  └─ manim_mcp\                      真正的包，可被 pytest 直接导入
 │     ├─ __init__.py
-│     ├─ declarative.py               equation / graph / diagram / compare
-│     ├─ render.py                    render
-│     ├─ check.py                     check
-│     ├─ style_guide.py               style_guide
-│     └─ runs.py                      runs
+│     ├─ app.py                       FastMCP 组装 + main() + --selftest
+│     ├─ config.py                    配置解析（env 优先，其次自动探测，最后默认值）
+│     ├─ style.py                     3b1b 配色/字号/节奏常量 + 中文字体探测
+│     ├─ engine\
+│     │  ├─ __init__.py
+│     │  ├─ workspace.py              run 目录生命周期、命名、保留与清理
+│     │  ├─ index.py                  维护 renders\index.json（动画库数据源）
+│     │  ├─ render.py                 写 scene.py → 调 manim 子进程 → 收产物
+│     │  ├─ postprocess.py            MP4 → GIF/WebP/PNG 与体积控制链
+│     │  └─ diagnostics.py            stderr/traceback → 结构化错误 + 修复提示
+│     ├─ scenes\                      4 个高层模板的 Manim 代码生成器
+│     │  ├─ __init__.py               模板注册表
+│     │  ├─ equation.py
+│     │  ├─ graph.py
+│     │  ├─ diagram.py
+│     │  └─ compare.py
+│     └─ tools\                       每个 MCP 工具的实现
+│        ├─ __init__.py
+│        ├─ envelope.py               统一返回信封 + 双内容块组装
+│        ├─ declarative.py            equation / graph / diagram / compare
+│        ├─ render.py                 render
+│        ├─ check.py                  check
+│        ├─ style_guide.py            style_guide
+│        └─ runs.py                   runs
 ├─ dsh-manim-gallery\                 DSH 原生插件（组件 2，见第 19 节）
 │  ├─ package.json                    dsh.bundle.patch + dsh.client{platform:web, inject}
 │  ├─ cordis.patch.yml                - insert: [{id: dsh-manim-gallery, name: ...}]
@@ -277,18 +281,21 @@ D:\myprogram\dshplugin\
   "runId": "20260912-153012-a1b2",
   "sceneName": "Equation",
   "assets": {
-    "mp4": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.mp4",
-    "gif": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.gif",
-    "poster": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.png"
+    "mp4": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\EquationScene.mp4",
+    "preview": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\EquationScene.gif",
+    "previewKind": "gif",
+    "poster": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\EquationScene.png"
   },
-  "previewMarkdown": "![anim](/D:/myprogram/dshplugin/renders/20260912-153012-a1b2/out/Equation.gif)",
+  "previewMarkdown": "![anim](/D:/myprogram/dshplugin/renders/20260912-153012-a1b2/out/EquationScene.gif)",
   "durationSec": 10.4,
   "renderSeconds": 9.8,
-  "gifBytes": 1834231,
+  "previewBytes": 73421,
   "quality": "draft",
   "warnings": []
 }
 ```
+
+`assets.preview` 指向**当前实际生效的预览产物**，`assets.previewKind` 说明它是 `gif` / `webp` / `png` 中的哪一种；降级发生时两者一起变，`previewMarkdown` 的扩展名也随之变。产物文件名统一用**场景类名**（如 `EquationScene.mp4`），不用工具名。
 
 失败：
 
@@ -372,12 +379,12 @@ renders\<runId>\
       "durationSec": 10.4,
       "renderSeconds": 9.8,
       "assets": {
-        "preview": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.gif",
+        "preview": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\EquationScene.gif",
         "previewKind": "gif",
-        "mp4": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.mp4",
-        "poster": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.png"
+        "mp4": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\EquationScene.mp4",
+        "poster": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\EquationScene.png"
       },
-      "previewUrlPath": "/D:/myprogram/dshplugin/renders/20260912-153012-a1b2/out/Equation.gif",
+      "previewUrlPath": "/D:/myprogram/dshplugin/renders/20260912-153012-a1b2/out/EquationScene.gif",
       "args": { "steps": 4 },
       "sessionId": "…",
       "warnings": []
