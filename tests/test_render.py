@@ -119,6 +119,29 @@ def test_successful_render_reports_the_mp4(tmp_path: Path):
     assert captured["kwargs"]["errors"] == "replace"
 
 
+def test_manim_never_inherits_our_stdin(tmp_path: Path):
+    """A child that reads stdin must see EOF, not the MCP protocol pipe.
+
+    The server's stdin is the client's still-open JSON-RPC pipe. When manim (or a
+    LaTeX helper it spawns) reads stdin, an inherited pipe blocks forever: every
+    render through the server hit the 180s timeout with empty stderr and an empty
+    media dir, while the identical render from a plain script finished in ~9s.
+    """
+    paths = make_run(tmp_path)
+    imported = paths.media / "videos" / "scene" / "480p15" / "EquationScene.mp4"
+    imported.parent.mkdir(parents=True)
+
+    captured = {}
+
+    def popen(argv, **kwargs):
+        captured["kwargs"] = kwargs
+        imported.write_bytes(b"mp4")
+        return FakeProcess(returncode=0)
+
+    render.render_scene(make_config(), paths, "EquationScene", "draft", popen=popen)
+    assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
+
+
 def test_failing_render_returns_a_diagnostic(tmp_path: Path):
     paths = make_run(tmp_path)
     workspace.write_scene(

@@ -21,9 +21,11 @@ class FakeRunner:
         self.sizes = dict(sizes or {})
         self.duration = duration
         self.calls: list[list[str]] = []
+        self.kwargs: list[dict] = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append(list(argv))
+        self.kwargs.append(kwargs)
         if argv[0] != FFMPEG:
             raise AssertionError(f"unexpected binary {argv[0]!r}")
         out = Path(argv[-1])
@@ -161,6 +163,25 @@ def test_poster_is_taken_from_the_last_frame(tmp_path: Path):
 def test_poster_is_produced_even_when_a_gif_wins(tmp_path: Path):
     build(tmp_path, {"gif": 500_000})
     assert (tmp_path / "Scene.png").exists()
+
+
+def test_ffmpeg_never_inherits_our_stdin(tmp_path: Path):
+    """A child that reads stdin must see EOF, not the MCP protocol pipe.
+
+    The server's stdin is the client's JSON-RPC pipe and stays open for the whole
+    session. An external program that reads stdin -- or a LaTeX helper waiting on
+    a prompt -- would block on it forever, which is exactly what happened: every
+    render through the server hung until its timeout while the same render
+    succeeded from a plain script.
+    """
+    runner = FakeRunner()
+    postprocess.build_preview(
+        FFMPEG, tmp_path / "a.mp4", tmp_path, "Scene",
+        target_bytes=1_000_000, max_bytes=2_000_000, run=runner,
+    )
+    assert runner.calls, "expected ffmpeg to be invoked"
+    for kwargs in runner.kwargs:
+        assert kwargs["stdin"] is subprocess.DEVNULL
 
 
 def test_missing_ffmpeg_yields_no_preview(tmp_path: Path):

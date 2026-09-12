@@ -39,6 +39,7 @@ def _run(argv: list[str], *, timeout: int, run=None) -> subprocess.CompletedProc
     runner = run or subprocess.run
     return runner(
         argv,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
         encoding="utf-8",
