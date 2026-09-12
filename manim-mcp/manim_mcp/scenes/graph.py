@@ -61,6 +61,37 @@ def evaluate(expression, x, bindings):
     return eval(expression, {"__builtins__": {}}, namespace)
 
 
+def visible_bounds(expression, bindings, samples=400):
+    """The stretch of X_RANGE where the curve is still inside Y_RANGE.
+
+    `Axes.plot` does not clip to `y_range`: x**2 on [-4, 4] leaves the window at
+    |x| = sqrt(3) and the rest of the parabola is drawn across the title. Sampling
+    the curve and shrinking the drawn interval is the only way to keep it in frame.
+    The full range comes back when nothing is visible, so a curve that is entirely
+    off-screen still renders (as nothing) instead of raising.
+    """
+    low = X_RANGE[0]
+    high = X_RANGE[1]
+    visible_low = None
+    visible_high = None
+    for index in range(samples):
+        x = X_RANGE[0] + (X_RANGE[1] - X_RANGE[0]) * index / (samples - 1)
+        try:
+            y = evaluate(expression, x, bindings)
+        except Exception:
+            # Model text is arbitrary; one bad sample must not kill the render.
+            continue
+        if y is None or y != y:
+            continue
+        if Y_RANGE[0] <= y <= Y_RANGE[1]:
+            if visible_low is None:
+                visible_low = x
+            visible_high = x
+    if visible_low is None:
+        return low, high
+    return visible_low, visible_high
+
+
 class GraphScene(Scene):
     def construct(self):
         axes = Axes(
@@ -72,10 +103,20 @@ class GraphScene(Scene):
             tips=False,
         )
         labels = axes.get_axis_labels(MathTex("x"), MathTex("y"))
+
+        if HAS_TITLE:
+            # `get_axis_labels` puts the y label at the very top of the y axis,
+            # which is exactly the band the title occupies. Moving the axes (and
+            # their labels with them) before anything is plotted keeps the two
+            # apart, and `axes.c2p` follows the shift so every curve, dot, and
+            # fill stays glued to the axes.
+            axes.shift(DOWN * 0.55)
+            labels.shift(DOWN * 0.55)
+
         self.play(Create(axes), Write(labels), run_time=1.0)
 
         if HAS_TITLE:
-            title = cn(@@TITLE@@, TITLE_SIZE, WHITE).to_edge(UP, buff=0.6)
+            title = cn(@@TITLE@@, TITLE_SIZE, WHITE).to_edge(UP, buff=0.45)
             self.play(Write(title), run_time=0.8)
 
         if HAS_PARAMETER:
@@ -86,7 +127,9 @@ class GraphScene(Scene):
                         lambda x: evaluate(
                             expression, x, {PARAM_SYMBOL: tracker.get_value()}
                         ),
-                        x_range=[X_RANGE[0], X_RANGE[1]],
+                        x_range=visible_bounds(
+                            expression, {PARAM_SYMBOL: tracker.get_value()}
+                        ),
                         color=color,
                     )
                 )
@@ -102,10 +145,10 @@ class GraphScene(Scene):
             graphs = [
                 axes.plot(
                     lambda x, expression=expression: evaluate(expression, x, {}),
-                    x_range=[X_RANGE[0], X_RANGE[1]],
+                    x_range=visible_bounds(EXPRESSIONS[i], {}),
                     color=color,
                 )
-                for expression, color in zip(EXPRESSIONS, PLOT_COLORS)
+                for i, (expression, color) in enumerate(zip(EXPRESSIONS, PLOT_COLORS))
             ]
             for graph in graphs:
                 self.play(Create(graph), run_time=1.2)
@@ -132,13 +175,20 @@ class GraphScene(Scene):
                 self.play(Create(slope_group), run_time=1.0)
 
             if SHOW_AREA:
-                area = axes.get_area(
-                    primary,
-                    x_range=[AREA_RANGE[0], AREA_RANGE[1]],
-                    color=C_HIGHLIGHT,
-                    opacity=0.35,
-                )
-                self.play(FadeIn(area), run_time=1.0)
+                # The fill is clipped by the same y_range, so it overflows the
+                # frame in exactly the same places the curve does. Intersect the
+                # requested interval with the curve's visible window first.
+                area_low, area_high = visible_bounds(EXPRESSIONS[0], {})
+                area_low = max(AREA_RANGE[0], area_low)
+                area_high = min(AREA_RANGE[1], area_high)
+                if area_low < area_high:
+                    area = axes.get_area(
+                        primary,
+                        x_range=[area_low, area_high],
+                        color=C_HIGHLIGHT,
+                        opacity=0.35,
+                    )
+                    self.play(FadeIn(area), run_time=1.0)
 
         self.wait(TAIL_WAIT)
 '''
