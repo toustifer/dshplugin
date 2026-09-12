@@ -13,6 +13,7 @@ from dsh_installer import (
     PANEL_ID,
     InstallerError,
     Targets,
+    build_fs_overlay_block,
     build_manim_insert_block,
     patch_client_render_root,
     plan_package_json,
@@ -271,3 +272,36 @@ def test_patch_client_render_root_refuses_to_guess():
 def test_panel_id_matches_the_one_plan_two_registers():
     """The sidebar entry id and the `main` key are the same string in Plan 2."""
     assert PANEL_ID == "manim-gallery"
+
+
+def test_fs_overlay_pins_the_filesystem_cwd_to_the_render_roots_parent(tmp_path: Path):
+    """`/api/file` resolves a rooted path with `node:path.resolve`.
+
+    For an argument starting with `/`, that call keeps only the cwd's **drive** and
+    discards its directories, so the reference the engine emits is the artifact's
+    absolute path minus the drive letter. Pinning the cwd to the render root's parent
+    supplies that drive by construction; unpinned, the host process's `C:\\Users\\...`
+    wins and every in-answer animation 404s.
+    """
+    block = build_fs_overlay_block(targets(tmp_path))
+    assert "- id: fs-sandbox" in block
+    assert "cwd: 'D:/myprogram/dshplugin'" in block
+    # The comment is the only place a future reader learns why the pin exists; if it
+    # is dropped the next edit is free to "simplify" the pin away.
+    assert "盘符" in block
+
+
+def test_fs_overlay_is_a_valid_entry_in_a_top_level_sequence(tmp_path: Path):
+    import yaml
+
+    parsed = yaml.safe_load("- id: connection\n" + build_fs_overlay_block(targets(tmp_path)))
+    assert [entry.get("id") for entry in parsed if "id" in entry] == ["connection", "fs-sandbox"]
+    assert parsed[1]["config"]["cwd"] == "D:/myprogram/dshplugin"
+
+
+def test_fs_overlay_is_removable_by_the_same_id(tmp_path: Path):
+    block = build_fs_overlay_block(targets(tmp_path))
+    stripped, removed = remove_insert_block("- id: connection\n" + block, "fs-sandbox")
+    assert removed is True
+    assert "fs-sandbox" not in stripped
+    assert "connection" in stripped

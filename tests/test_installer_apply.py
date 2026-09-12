@@ -86,6 +86,7 @@ def test_plan_install_describes_every_step_without_touching_anything(sandbox: Ta
     assert kinds == [
         "backup",
         "yaml-insert",
+        "pin-fs-cwd",
         "copy-plugin",
         "patch-package-json",
         "patch-render-root",
@@ -105,10 +106,32 @@ def test_plan_install_is_idempotent_after_apply(sandbox: Targets):
     assert flags["copy-plugin"]["changed"] is False
     assert flags["copy-skill"]["changed"] is False
     assert flags["link-package"]["changed"] is False
+    assert flags["pin-fs-cwd"]["changed"] is False
     # The MCP row is always replaced (remove + append is how idempotence works),
     # so it is the one step that legitimately still reports a change.
     assert flags["yaml-insert"]["replaced"] is True
     assert again["changed"] is False
+
+
+def test_plan_install_notices_a_stale_comment_on_an_otherwise_correct_overlay(
+    sandbox: Targets,
+):
+    """`changed` must mean "the file already matches", not "the cwd value matches".
+
+    The bug this pins down: the check used to ask only whether the `cwd:` line was
+    present, so after the block's explanatory comment was rewritten the plan still
+    reported `changed: false` for a run that did rewrite the file. A plan that
+    under-reports is how a stale comment survives a reinstall unnoticed.
+    """
+    apply_install(sandbox)
+    text = sandbox.patch_file.read_text(encoding="utf-8")
+    sandbox.patch_file.write_text(
+        text.replace("盘符", "旧口径").replace("丢掉它的目录", "旧的解释"), encoding="utf-8"
+    )
+
+    changes = {step["kind"]: step for step in plan_install(sandbox)["steps"]}
+    assert changes["pin-fs-cwd"]["changed"] is True
+    assert plan_install(sandbox)["changed"] is True
 
 
 def test_apply_install_mounts_the_mcp_without_disturbing_other_entries(sandbox: Targets):
@@ -124,9 +147,16 @@ def test_apply_install_mounts_the_mcp_without_disturbing_other_entries(sandbox: 
 
     parsed = yaml.safe_load(text)
     assert isinstance(parsed, list)
-    assert [entry.get("id") for entry in parsed if "id" in entry] == ["connection"]
+    assert [entry.get("id") for entry in parsed if "id" in entry] == [
+        "connection",
+        "fs-sandbox",
+    ]
     inserts = [entry["insert"][0]["id"] for entry in parsed if "insert" in entry]
     assert inserts == ["mcp-agentflow", "mcp-manim"]
+
+    # The overlay is what makes the Markdown channel's rooted path resolve.
+    overlay = [entry for entry in parsed if entry.get("id") == "fs-sandbox"][0]
+    assert overlay["config"]["cwd"] == sandbox.render_root.parent.as_posix()
 
 
 def test_apply_install_writes_a_backup_next_to_the_patch_file(sandbox: Targets):
@@ -220,6 +250,7 @@ def test_plan_uninstall_reports_what_it_would_remove(sandbox: Targets):
     assert kinds == [
         "backup",
         "yaml-remove",
+        "unpin-fs-cwd",
         "remove-package-json-entry",
         "remove-plugin-dir",
         "remove-skill-dir",
@@ -227,6 +258,7 @@ def test_plan_uninstall_reports_what_it_would_remove(sandbox: Targets):
     ]
     flags = {step["kind"]: step for step in plan["steps"]}
     assert flags["yaml-remove"]["present"] is True
+    assert flags["unpin-fs-cwd"]["present"] is True
     assert flags["remove-plugin-dir"]["changed"] is True
     assert plan["changed"] is True
 

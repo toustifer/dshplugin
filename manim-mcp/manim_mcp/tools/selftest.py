@@ -113,7 +113,7 @@ def run(
         print("  preview     : 未生成（见上面的依赖问题）")
     else:
         print(f"  preview     : OK {preview.kind} {preview.byte_size} bytes -> {preview.path}")
-        markdown = envelope.preview_markdown(preview.path)
+        markdown = envelope.preview_markdown(preview.path, cfg.render_root)
         print(f"  markdown    : {markdown}")
     for note in preview.warnings:
         print(f"  warning     : {note}")

@@ -115,7 +115,7 @@ def execute(
         assets["poster"] = str(poster)
 
     markdown = (
-        envelope.preview_markdown(preview.path) if preview.path is not None else None
+        envelope.preview_markdown(preview.path, cfg.render_root) if preview.path is not None else None
     )
     if preview.path is not None and markdown is None:
         warnings.append(
@@ -170,7 +170,7 @@ def _record(
     notes: list[str] = []
     preview_url = ""
     if assets.get("preview"):
-        markdown = envelope.preview_markdown(assets["preview"])
+        markdown = envelope.preview_markdown(assets["preview"], cfg.render_root)
         if markdown:
             preview_url = markdown.split("](", 1)[1].rstrip(")")
 

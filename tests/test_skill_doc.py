@@ -64,6 +64,17 @@ def test_the_preview_requirement_is_explicit():
     assert "previewMarkdown" in TEXT
 
 
+def test_the_preview_requirement_covers_the_null_case():
+    """`previewMarkdown` is null when the artifact is outside the render root.
+
+    The failure mode this guards against: the model guesses a path to keep the
+    animation inline, and the answer ships a broken image next to a working tool
+    card.
+    """
+    assert "null" in TEXT
+    assert "伪造" in TEXT or "不要编" in TEXT
+
+
 def test_the_one_sentence_requirement_is_present():
     """An animation without a sentence naming the relation it shows is decoration."""
     assert "一句话" in TEXT

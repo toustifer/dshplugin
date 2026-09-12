@@ -124,18 +124,48 @@ def test_no_preview_yields_text_only():
     assert len(envelope.content_blocks({"ok": True}, None, None)) == 1
 
 
-def test_preview_markdown_helper_uses_the_slash_drive_form():
-    assert envelope.preview_markdown(r"D:\myprogram\dshplugin\renders\r1\out\S.gif") == (
-        "![anim](/D:/myprogram/dshplugin/renders/r1/out/S.gif)"
-    )
+def test_preview_markdown_drops_the_drive_and_keeps_every_directory():
+    """The Host resolves a `/`-rooted reference against the filesystem cwd's *drive*.
+
+    Measured with `node:path.resolve`:
+      * `resolve('D:\\\\proj', '/myprogram/dshplugin/renders/x.gif')`
+        -> `D:\\myprogram\\dshplugin\\renders\\x.gif`  (reaches the file)
+      * `resolve('D:\\\\proj', '/renders/x.gif')` -> `D:\\renders\\x.gif`  (misses)
+      * `resolve('D:\\\\proj', '/D:/myprogram/x.gif')` -> `D:\\D:\\myprogram\\x.gif`  (misses)
+
+    So the reference is the full absolute path minus the drive letter, and the
+    pinned cwd only has to supply the right drive. An earlier design emitted
+    `/renders/<run>/out/S.gif`; it 404'd, which is what this pins down.
+    """
+    assert envelope.preview_markdown(
+        r"D:\myprogram\dshplugin\renders\r1\out\S.gif",
+        r"D:\myprogram\dshplugin\renders",
+    ) == "![anim](/myprogram/dshplugin/renders/r1/out/S.gif)"
+
+
+def test_rooted_reference_handles_both_host_shapes():
+    assert envelope.rooted_reference("D:/a/b/c.gif") == "/a/b/c.gif"
+    assert envelope.rooted_reference("C:/a/b/c.gif") == "/a/b/c.gif"
+    assert envelope.rooted_reference("/a/b/c.gif") == "/a/b/c.gif"
+
+
+def test_rooted_reference_refuses_paths_with_no_same_origin_form():
+    assert envelope.rooted_reference("//server/share/a.gif") is None  # UNC
+    assert envelope.rooted_reference("relative/a.gif") is None
+    assert envelope.rooted_reference("") is None
+
+
+def test_preview_markdown_refuses_an_unknown_render_root():
+    """A reference that cannot resolve must not be emitted at all: a broken image in
+    the answer is worse than no image, because the answer still shows the real one
+    from the tool result."""
+    assert envelope.preview_markdown(r"D:\r\S.gif") is None
+
+
+def test_preview_markdown_refuses_an_artifact_outside_the_render_root():
+    assert envelope.preview_markdown(r"D:\elsewhere\S.gif", r"D:\renders") is None
 
 
 def test_preview_markdown_rejects_a_path_with_markdown_breaking_characters():
-    assert envelope.preview_markdown(r"D:\my (dir)\S.gif") is None
-    assert envelope.preview_markdown(r"D:\我的目录\S.gif") is None
-
-
-def test_preview_markdown_handles_a_posix_path():
-    assert envelope.preview_markdown("/home/u/renders/r1/out/S.gif") == (
-        "![anim](/home/u/renders/r1/out/S.gif)"
-    )
+    assert envelope.preview_markdown(r"D:\renders\my (dir)\S.gif", r"D:\renders") is None
+    assert envelope.preview_markdown(r"D:\renders\我的目录\S.gif", r"D:\renders") is None

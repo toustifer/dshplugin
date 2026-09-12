@@ -553,19 +553,28 @@ Manim 的 `Text` 默认字体不含中文，会渲染成方框。方案：
 - 前提：当前模型声明了 `image` 输入能力。已确认默认模型 `deepseek-official/deepseek-flash` 的 `inputModalities` 为 `["text","image"]`
 - 本 GUI 已实测：工具结果中的图片块正常内嵌显示
 
-### 通道 B：回复内 Markdown 绝对路径（兜底）
+### 通道 B：回复内 Markdown 同源路径（模型主动贴出，动画出现在正文里）
 
-前端 `localPathMediaUrl` 会把**以 `/` 开头的 Markdown 图片目标**映射为 `${origin}/api/file?path=<encodeURIComponent(目标)>`。
+> 用户明确要求「动画作为消息直接嵌入到回复正文里」，因此这条不是兜底，而是**正文呈现的主通道**。通道 A 仍在，它让动画在工具卡片里也出现一次，且不依赖模型配合。
 
-Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `win32.normalize` 会把形如 `/D:/x/y.gif` 的路径正确识别出驱动器号 `D:` 并归一化为 `D:\x\y.gif`。因此：
+前端把**以 `/` 开头、且不以 `//` 开头的 Markdown 图片目标**映射为 `${origin}/api/file?path=<encodeURIComponent(目标)>`；`http(s)://` 目标直接使用；`dsh-resource://` 会被拒。因此信封里的 `previewMarkdown` 必须是这两种形状之一，模型只需原样粘贴。
 
-```markdown
-![anim](/D:/myprogram/dshplugin/renders/<runId>/out/Equation.gif)
-```
+**目标形式是被实测定死的，本节早先的推断是错的。** 早先写过「`/D:/myprogram/...` 会被 `win32.normalize` 正确识别出驱动器号」，实测**不成立**：Host 用 `path.resolve(cwd, p)`，而对以 `/` 开头的实参，`resolve` 会**丢弃 cwd 的目录、只取它的盘符**。
 
-会被解析为 `http://127.0.0.1:3080/api/file?path=%2FD%3A%2F...`，同源请求携带既有登录态，图片正常显示。**这条路与模型是否具备图片能力无关**，因此是可靠的兜底。
+三条对照（`node -e` 实测，`cwd = D:\myprogram\dshplugin`）：
 
-信封里的 `previewMarkdown` 就是按这个格式生成的，模型只需原样粘贴。
+| Markdown 目标 | `resolve` 结果 | 是否存在 |
+|---|---|---|
+| `/myprogram/dshplugin/renders/<runId>/out/Equation.gif` | `D:\myprogram\dshplugin\renders\<runId>\out\Equation.gif` | ✅ |
+| `/renders/<runId>/out/Equation.gif` | `D:\renders\<runId>\out\Equation.gif` | ❌ |
+| `/D:/myprogram/dshplugin/renders/<runId>/out/Equation.gif` | `D:\D:\myprogram\dshplugin\renders\...` | ❌ |
+
+结论有两条，缺一不可：
+
+1. **引用形式 = 去掉盘符的完整绝对路径**（`D:\a\b.gif` → `/a/b.gif`）。`envelope.preview_markdown` 按此生成，并抽成纯函数 `rooted_reference` 以便直接断言；产物不在渲染根内、或路径无盘符（UNC）时返回 `None`，绝不发出一个会 404 的引用。
+2. **文件系统 provider 的 cwd 必须与产物同盘符**——目录无所谓，盘符才决定结果。`install.ps1` 把 `fs-sandbox.cwd` 钉到 `renders/` 的父目录来保证这一点；没有这个钉，宿主进程自己的 `C:\Users\...` 会胜出，正文里每个动画都 404。
+
+端到端已实测（`tests/manual/probe_file_api.mjs`，用本机 browser-session secret 签一个真 cookie，对运行中的 Host 发 `HEAD /api/file`）：新形式返回 `200 image/gif` 且字节数与信封里的 `previewBytes` 逐字节一致；上表两种旧形式均 404；不带 cookie 为 401。
 
 > 由此产生的硬约束：产物路径不能含空格、括号、中文——已在 7.1 节通过 run 命名规则保证。
 

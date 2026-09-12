@@ -1752,6 +1752,21 @@ Expected: 面板与工具都回来，**`renders\` 里原有的动画仍全部在
 
 ---
 
+## 执行期间的偏离记录
+
+按 TDD 执行时发现计划本身的问题，已就地修正。**这些修正优先于上方对应步骤的原文。**
+
+| # | 任务 | 计划原文的问题 | 实际采用的修正 |
+|---|---|---|---|
+| 1 | Task 1 | 计划里的模块名是 `installer`，而 PyPI 上存在同名包——`import installer` 会解析到 site-packages 里那个无关的包，测试**碰巧**通过 | 模块改名为 `dsh_installer`（`tools/dsh_installer.py`），测试与 `install.ps1` 同步 |
+| 2 | Task 1 / 3 | 早期 `python dsh_installer.py install …` 在 `main()` 尚不存在时**以退出码 0 空转**，让一条本该失败的 CLI 测试通过 | 测试加强为断言 `mcp-manim` 真的落进了 `cordis.patch.yml`，而不是只看退出码 |
+| 3 | Task 4 | SKILL.md 的硬性要求写「回答里**必须**包含 `previewMarkdown`」，但引擎在产物落在渲染根之外时会合法地返回 `null`（见 Plan 1 偏离 20） | 拆成两条：非 `null` 时必须**原样**粘贴（改一个字符就会 404）；为 `null` 时**不得伪造**引用，照常给正文并说明动画在工具卡片里。`tests/test_skill_doc.py` 增加 `test_the_preview_requirement_covers_the_null_case` |
+| 4 | Task 4 / 5 | 计划未涉及文件系统解析基准。正文内嵌动画依赖「`fs-sandbox.cwd` 与产物同盘符」，缺这一步则正文里每个动画都 404 | 新增 `build_fs_overlay_block`，把 `fs-sandbox.cwd` 钉到 `renders/` 的父目录；`plan_uninstall` 用同一 id 移除。`test_installer_apply.py` 断言它会随安装落地、随卸载消失、且重装时逐字幂等 |
+| 5 | Task 6 | 计划 Step 6 之后没有留下**可重复**的正文通道验收手段（此前是手工看浏览器） | 新增 `tests/manual/probe_file_api.mjs`：用本机 browser-session secret 签一个真 cookie，对运行中的 Host 发 `HEAD /api/file`，对照新/旧引用形式并核对字节数。它把「动画在正文里到底能不能加载」从目视变成了可重跑的命令 |
+| 6 | Task 6 Step 7–8 | 计划要求做一次完整的卸载→重装往返 | **尚未执行**（属破坏性操作，会短暂移除工具与面板）。卸载前的快照已存于 `C:\Users\15775\.dsh\manim-install-before.txt`（2282 字节），沙盒内的逐字节往返一致性由 `test_installer_apply.py` 覆盖；真机往返待用户确认时机 |
+
+---
+
 ## 完成判据
 
 | # | 判据 | 由谁证明 |

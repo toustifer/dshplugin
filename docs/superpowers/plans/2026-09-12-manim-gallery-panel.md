@@ -1523,6 +1523,12 @@ git commit -m "docs(manim-gallery): 组件说明、数据通路与只读边界"
 | 4 | Task 4 | `react.useEffect(() => { load(); })` 不返回 promise，所以 `await effect.fn()` **在 fetch 完成前就返回**，三条断言全部读到 `phase: "loading"`。而 effect 也不能返回那个 promise——React 会把返回值当成清理函数 | 把加载状态机抽成独立的 `loadInto(setState)`（与 `galleryView` 同样的分解思路）；测试用**自己的 recorder** 直接 await 它，另有一条测试证明 effect 确实启动了加载 |
 | 5 | Task 3 / 4 | 计划把 Task 3 与 Task 4 安排为两次提交 | 实际合并为一次（`40f8bca`）。视图层与接线在同一文件里交替改动，拆开会让中间提交短暂不可用 |
 | 6 | Task 5 | 计划给了 4 条样式测试 | 增加第 5 条 `apply injects the stylesheet`：前 4 条只测 `ensureStyle` 自己，没有一条证明 `apply` 真的调了它 |
+| 7 | 后续需求（右侧栏） | 计划只把面板挂在左侧栏。用户要求「动画要能显示到右侧的文件预览区」，于是用 `ctx.get("sidebarRight")` 取服务——**恒为 `undefined`**：`ctx.get` 会跨越插件作用域边界，取不到由别的插件提供的服务 | 改为与官方插件同构的写法：`exports.inject = ["slots","sidebarRight","layout"]`，然后读 `ctx.sidebarRight` / `ctx.layout`。依据是 shipped 的 `dsh-client-ui-sidebar-files` 正是 `inject` 后直接读属性 |
+| 8 | 后续需求（右侧栏） | `sidebarRight.controller.openResource()` 在右列的座位挂载完成前会**抛** `"sidebarRight: no session surface is mounted"`，而挂载时机与插件 `apply` 的相对顺序不保证 | `openInRightbar` 改为重试循环（40 × 50ms），全部失败才 warn。**不静默**：失败路径留下明确日志 |
+| 9 | 后续需求（右侧栏） | `fileUrl` 给绝对路径**加了前导斜杠**，发出的 `path` 形如 `/D:/...`，Host 解析成 `C:\D:\...` → 面板里每张图 404 | 去掉前导斜杠，原样发送 `D:/...`。用户确认「成功了」。与引擎侧第 20 条偏离**同源同因**：同一个 `path.resolve` 语义在两个组件里各咬了一次 |
+| 10 | 后续需求（右侧栏） | `makeGalleryPage` 在签名改为接收已解析的 `services` 之后，函数体内仍留着 `ctx.get(...)`，渲染期抛 `ctx.get is not a function` | 改为完全从传入的 `services` 取值；新增测试钉死「页面构造期不触碰 ctx」 |
+| 11 | 后续需求（入口位置） | 用户反馈「我没有看到点开之后有动画库之类的」，并要求「或者你可以把动画库放到右上角这里」 | 除左侧栏常驻图标外，再注册 `conversation.session.header.utilities`（右对齐、会话级）的「动画库」按钮作为**第二入口**；两个入口调同一个 `openGalleryPanel` |
+| 12 | 后续需求（可验证性） | 客户端插件跑在浏览器里，离线测试只能覆盖纯函数，无法证明它真的挂上了槽位 | `publishProbe(services)` 把面板状态挂到 `globalThis.__DSH_MANIM_GALLERY__`，使槽位注册与右栏可用性可被外部查询验证；这是**诊断面**，不参与业务逻辑 |
 
 **执行结果**：53 个离线测试全绿（计划预期 42 + 4 = 46，多出的 7 条来自上表第 2/3/4/6 条的修正与加强），`lib/client.js` 零硬编码颜色、零写请求。
 

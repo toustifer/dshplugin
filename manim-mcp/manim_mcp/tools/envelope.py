@@ -20,32 +20,71 @@ from ..engine.postprocess import MIME_BY_KIND
 MARKDOWN_ALT = "anim"
 # Markdown image destinations break on whitespace, parentheses, and non-ASCII.
 UNSAFE_MARKDOWN_RE = re.compile(r"[\s()<>\"'\u4e00-\u9fff]")
-# `D:/...` or `C:/...` — the form a Windows absolute path takes after slash
-# normalisation, and the form Node's win32 `normalize` resolves back correctly
-# once a single leading slash is prepended.
+# `D:/...` or `C:/...`.
 DRIVE_RE = re.compile(r"^[A-Za-z]:/")
 
 SUPPORTED_IMAGE_MIMES = frozenset(MIME_BY_KIND.values())
 
 
-def preview_markdown(path: str | Path) -> str | None:
-    """The `/D:/...` Markdown image reference the DSH web UI rewrites to `/api/file`.
+def preview_markdown(path: str | Path, render_root: str | Path | None = None) -> str | None:
+    """A Markdown image reference the DSH web UI can actually load.
 
-    Returns None when the path cannot survive Markdown, which is why run ids and
-    file names are restricted to ASCII without spaces or brackets.
+    The renderer accepts exactly two shapes: an `http(s)://` URL, or a same-origin
+    path that starts with `/`. A Windows absolute path is therefore unusable — the
+    Host resolves the path with `node:path.resolve`, and `/D:/x` becomes
+    `C:\\D:\\x`, so the image 404s.
+
+    The shape that *does* work is the absolute path **with the drive letter
+    removed**: `D:\\a\\b\\c.gif` becomes `/a/b/c.gif`. Two measured facts make that
+    the only workable form:
+
+    * `node:path.resolve('D:\\\\cwd', '/a/b')` is `D:\\a\\b` — for a `/`-rooted
+      argument `resolve` discards the cwd's directories entirely and keeps only its
+      **drive**. So `/<path from the drive root>` is the reference, and the pinned
+      cwd's *directory* is irrelevant.
+    * `resolve('D:\\\\cwd', '/D:/a/b')` is `D:\\D:\\a\\b`, and
+      `resolve('D:\\\\cwd', '/renders/x')` is `D:\\renders\\x` — neither is the file.
+
+    The invariant this depends on: **the filesystem provider's cwd must sit on the
+    same drive as the render root.** `install.ps1` pins `fs-sandbox.cwd` to the
+    render root's parent, which satisfies it by construction. Because the artifact
+    is always inside the render root, that invariant holds for every reference this
+    function returns.
+
+    When the render root is unknown, the artifact lives outside it, or the absolute
+    path carries no drive (a UNC or POSIX path the Host cannot reach this way), this
+    returns None rather than emitting a reference that would render as a broken image.
     """
-    text = str(path)
-    if not text or UNSAFE_MARKDOWN_RE.search(text):
+    if render_root is None:
         return None
 
-    normalized = text.replace("\\", "/")
-    if normalized.startswith("//"):
+    artifact = Path(path).resolve()
+    try:
+        artifact.relative_to(Path(render_root).resolve())
+    except ValueError:
         return None
-    if DRIVE_RE.match(normalized):
-        normalized = "/" + normalized
-    elif not normalized.startswith("/"):
+
+    absolute = artifact.as_posix()
+    reference = rooted_reference(absolute)
+    if reference is None or UNSAFE_MARKDOWN_RE.search(reference):
         return None
-    return f"![{MARKDOWN_ALT}]({normalized})"
+    return f"![{MARKDOWN_ALT}]({reference})"
+
+
+def rooted_reference(absolute_posix: str) -> str | None:
+    """Turn an absolute path into the `/`-rooted reference the Host can resolve.
+
+    Split out from :func:`preview_markdown` because the two host shapes are worth
+    asserting directly: a Windows path keeps its directories and loses only the
+    drive (`D:/a/b` -> `/a/b`), while a POSIX path is already the reference
+    (`/a/b` -> `/a/b`). Anything else — a UNC share, a relative path — has no
+    same-origin form and yields None.
+    """
+    if DRIVE_RE.match(absolute_posix):
+        return absolute_posix[2:]
+    if absolute_posix.startswith("/") and not absolute_posix.startswith("//"):
+        return absolute_posix
+    return None
 
 
 def success_payload(

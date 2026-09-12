@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 MANIM_BLOCK_ID = "mcp-manim"
+FS_BLOCK_ID = "fs-sandbox"
 GALLERY_PACKAGE = "dsh-manim-gallery"
 PANEL_ID = "manim-gallery"
 SKILL_NAME = "manim-explainer"
@@ -130,8 +131,42 @@ def build_manim_insert_block(targets: Targets) -> str:
     )
 
 
+def build_fs_overlay_block(targets: Targets) -> str:
+    """Pin the filesystem provider's cwd to the render root's parent.
+
+    `/api/file` resolves the `path` it is given with `node:path.resolve`, and for an
+    argument that starts with `/` that call **discards the cwd's directories and
+    keeps only its drive**:
+
+        resolve('D:\\\\proj', '/myprogram/dshplugin/renders/x.gif')
+            -> 'D:\\\\myprogram\\\\dshplugin\\\\renders\\\\x.gif'   (the file)
+        resolve('D:\\\\proj', '/renders/x.gif')      -> 'D:\\\\renders\\\\x.gif'   (misses)
+        resolve('D:\\\\proj', '/D:/myprogram/x.gif') -> 'D:\\\\D:\\\\myprogram\\\\x.gif' (misses)
+
+    So the reference the engine emits is the artifact's absolute path with the drive
+    letter removed (see `envelope.preview_markdown`), and the only thing this pin has
+    to contribute is the **drive**. Pinning to the render root's parent supplies it by
+    construction; without the pin the host process's own cwd (`C:\\Users\\...`) wins
+    and every in-answer animation 404s — measured, not assumed.
+
+    The shipped base config documents this overlay point: "`cwd` defaults to
+    `process.cwd()`; an overlay can pin another workspace."
+    """
+    parent = targets.render_root.parent
+    return "\n".join(
+        [
+            "# 把文件系统的解析基准钉到与渲染产物同一个盘符：正文里的动画引用是「去掉盘符的绝对路径」，",
+            "# 而 node:path.resolve 对以 / 开头的实参只取 cwd 的盘符、丢掉它的目录。不钉就会落到宿主进程的 C:。",
+            f"- id: {FS_BLOCK_ID}",
+            "  config:",
+            f"    cwd: {_yaml_scalar(parent.as_posix())}",
+            "",
+        ]
+    )
+
+
 def remove_insert_block(text: str, block_id: str) -> tuple[str, bool]:
-    """Drop the `- insert:` entry whose row carries `id: block_id`.
+    """Drop the top-level entry whose `id:` row carries `block_id`.
 
     Returns `(new_text, removed)`. Comment preservation is why this is line-based
     rather than a YAML round-trip: the file explains each row in Chinese comments,
@@ -275,6 +310,17 @@ def plan_install(targets: Targets) -> dict:
         Step("backup", {"path": str(targets.patch_file)}),
         Step("yaml-insert", {"id": MANIM_BLOCK_ID, "replaced": replaced}),
         Step(
+            "pin-fs-cwd",
+            {
+                "cwd": targets.render_root.parent.as_posix(),
+                # Compare the WHOLE block, comment included. Asking only whether the
+                # `cwd:` line is present reports "nothing to do" for a run that in
+                # fact rewrites the block — which is how a stale comment survives a
+                # reinstall while the plan claims the file is already current.
+                "changed": build_fs_overlay_block(targets).rstrip("\n") not in patch_text,
+            },
+        ),
+        Step(
             "copy-plugin",
             {
                 "from": str(targets.source_root / GALLERY_PACKAGE),
@@ -324,12 +370,14 @@ def plan_install(targets: Targets) -> dict:
 
 def plan_uninstall(targets: Targets) -> dict:
     _, present = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    _, fs_present = remove_insert_block(_read(targets.patch_file), FS_BLOCK_ID)
     _, package_changed = plan_package_json(
         _read(targets.profile_package), plugin_dir=targets.plugin_dir, remove=True
     )
     steps = [
         Step("backup", {"path": str(targets.patch_file)}),
         Step("yaml-remove", {"id": MANIM_BLOCK_ID, "present": present, "changed": present}),
+        Step("unpin-fs-cwd", {"id": FS_BLOCK_ID, "present": fs_present, "changed": fs_present}),
         Step("remove-package-json-entry", {"changed": package_changed}),
         Step(
             "remove-plugin-dir",
@@ -375,9 +423,13 @@ def apply_install(targets: Targets, *, copy_plugin: bool = True, link: bool = Tr
     _backup(targets.patch_file)
 
     stripped, _ = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    stripped, _ = remove_insert_block(stripped, FS_BLOCK_ID)
     if stripped and not stripped.endswith("\n"):
         stripped += "\n"
-    _write(targets.patch_file, stripped + build_manim_insert_block(targets))
+    _write(
+        targets.patch_file,
+        stripped + build_manim_insert_block(targets) + build_fs_overlay_block(targets),
+    )
 
     if copy_plugin:
         if targets.plugin_dir.exists():
@@ -417,6 +469,7 @@ def apply_uninstall(targets: Targets, *, purge_renders: bool = False) -> dict:
     _backup(targets.patch_file)
 
     stripped, _ = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    stripped, _ = remove_insert_block(stripped, FS_BLOCK_ID)
     _write(targets.patch_file, stripped)
 
     package_path = targets.profile_package
