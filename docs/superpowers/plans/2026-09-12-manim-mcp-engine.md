@@ -6419,6 +6419,11 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 
 | 15 | Task 18 | `tests/test_app.py` 的 `test_selftest_returns_nonzero_when_a_dependency_is_missing` 断言 `app.selftest(broken) == 2`，但 Task 18 建的 `tools/selftest.py` 按计划就是 `return 0` 的占位版（Task 19 才替换），该测试在 Task 18 **必然红**，与「每个任务真的走红→绿」的纪律冲突 | Task 18 的 `tests/test_app.py` **不含**这个测试（它的主题属于 Task 19，且 Task 19 的 `test_missing_ffmpeg_exits_two_and_creates_no_run` 已覆盖同一行为），Task 18 实际 7 passed（计划写 8 passed） |
 
+| 16 | Task 20（真机验收 Step 3 后的目视验收） | **完成判据 5「故意喂坏代码，信封含正确的 `line` 与非空 `hint`」在真机上根本达不到**：manim 0.20.1 的失败渲染**不打印普通 traceback**，`error_console.print_exception()` 画的是 rich 边框面板（右侧补空格、长路径折成两行）。面板里每一行都不匹配 `FRAME_RE`，于是 `parse_traceback` 返回 `(None, None, None)`，tool 信封退化成 `{stage:"manim", message:"manim 退出码 1"}`——**type / line / sourceLine / hint 全部丢失**。Task 6 的 fixture 是手写的普通格式，所以单元测试全绿而真机全废 | `engine/diagnostics.py` 新增 `unwrap_panels()`：去掉面板边框、`PANEL_HEADER_RE` 去掉带标题的顶边、把被 rich 从扩展名中间折断的 frame 行重新拼回（`scene.p` + `y:6 in construct` → `File "...scene.py", line 6, in construct`）。判据不是猜行形状，而是「拼接后能否解析成 frame」，所以普通 traceback 原样通过。`FRAME_RE` 放宽为容忍 rich 吞掉逗号（`",? +line"`），异常类型改用 `re.search`（面板里异常前有边框，不再位于行首）。新增 `tests/fixtures/manim_panel_nameerror.txt`（真机 stderr 原文）+ 3 个回归测试 |
+| 17 | Task 20（README） | 计划 Step 4 要求 README「配置项表与 Spec §14 完全一致」，但 Spec §7.1 写的 `runId = YYYYMMDD-HHMMSS-<4位随机>` 已在偏离记录第 3 条被改为 32 位熵（8 位 hex） | README 按**实现**写 `YYYYMMDD-HHMMSS-<8位hex>`，并注明 32 位熵；其余配置项与 Spec §14 逐项一致 |
+
+> 第 16 条的教训与第 8 条同源：**单元测试的 fixture 是手写的，真机输出不是。** 第 8 条是「`ast.parse` 通过 ≠ 能 import」，这条是「普通 traceback 能解析 ≠ 真机能解析」。凡是解析**外部程序输出**的代码，fixture 必须来自真机原文，且 Task 20 的目视验收/端到端验收不能省。
+
 以下偏离是**预先设计**的，不属缺陷：Task 9 先建 `graph/diagram/compare` 三个抛 `SceneSpecError` 的占位模块（Task 10–12 替换）；Task 18 先建 `tools/selftest.py` 的 `return 0` 版（Task 19 替换）。
 
 ---
