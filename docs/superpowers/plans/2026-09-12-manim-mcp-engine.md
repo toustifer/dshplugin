@@ -6417,6 +6417,8 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 
 > 第 8 条的教训值得单独记一笔：`ast.parse` 通过并不代表代码能 import。任何把值编译成源码的地方（`scenes/`）都不能只用 `ast.parse` 断言，要么用 `python_literal()` 这类共享助手，要么真跑一次。
 
+| 15 | Task 18 | `tests/test_app.py` 的 `test_selftest_returns_nonzero_when_a_dependency_is_missing` 断言 `app.selftest(broken) == 2`，但 Task 18 建的 `tools/selftest.py` 按计划就是 `return 0` 的占位版（Task 19 才替换），该测试在 Task 18 **必然红**，与「每个任务真的走红→绿」的纪律冲突 | Task 18 的 `tests/test_app.py` **不含**这个测试（它的主题属于 Task 19，且 Task 19 的 `test_missing_ffmpeg_exits_two_and_creates_no_run` 已覆盖同一行为），Task 18 实际 7 passed（计划写 8 passed） |
+
 以下偏离是**预先设计**的，不属缺陷：Task 9 先建 `graph/diagram/compare` 三个抛 `SceneSpecError` 的占位模块（Task 10–12 替换）；Task 18 先建 `tools/selftest.py` 的 `return 0` 版（Task 19 替换）。
 
 ---
