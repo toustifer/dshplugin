@@ -132,8 +132,16 @@ renders\
 cd D:\myprogram\dshplugin
 D:\ProgramData\anaconda3\python.exe -m pytest                  # 单元测试，不需要真机渲染
 D:\ProgramData\anaconda3\python.exe tests\manual\render_templates.py   # 四个模板各渲染一次（真机）
+D:\ProgramData\anaconda3\python.exe tests\manual\acceptance_tools.py   # 经真实 stdio 服务端调用四个工具
 D:\ProgramData\anaconda3\python.exe tests\manual\stdio_smoke.py        # 子进程 + stdio 冒烟
 ```
 
 **改动 `manim_mcp\scenes\` 之后必须跑 `render_templates.py`。** 单元测试只能断言生成的源码文本，
 而「`ast.parse` 通过但 import 时 `NameError`」这类缺陷只有真机渲染能发现。
+
+**改动 `tools\`、`app.py`、`engine\render.py` 或 `engine\postprocess.py` 之后必须跑 `acceptance_tools.py`。**
+`render_templates.py` 直接调 `scenes.build` 并自己起子进程，完全绕开 pipeline，因此它发现不了工具层的问题。
+这条命令存在的理由很具体：外部程序（manim / ffmpeg）**必须**以 `stdin=DEVNULL` 启动。服务端的 stdin 是
+客户端持有的、整场会话都不关闭的 JSON-RPC 管道；一旦子进程继承了它，子进程读到 stdin 就会永久阻塞。
+这个缺陷只在「stdio 服务端 + 工具调用」这一种组合下复现——直接调用、in-process 客户端、`asyncio.to_thread`
+**全都正常**，所以只有走真实 stdio 的验收能拦住它。

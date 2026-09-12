@@ -6415,6 +6415,8 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 
 **新增的验收工具**：`tests/manual/render_templates.py` —— 用真机 Manim 把四个模板（外加参数滑动的 graph）各渲染一次。第 8/9/10 条缺陷全是它发现的，而单元测试**全都漏掉了**。**改动 `manim_mcp/scenes/` 之后必须跑它。**
 
+**新增的验收工具（补充）**：`tests/manual/acceptance_tools.py` —— 经**真实 stdio 服务端**依次调用四个声明式工具，校验产物落盘、信封字段与 `renders/index.json` 收录。它与 `render_templates.py` 互补：后者只验模板层（绕开 pipeline），前者验工具层与 run 画廊。第 18 条缺陷是它发现的。**改动 `tools/`、`app.py`、`engine/render.py` 或 `engine/postprocess.py` 之后必须跑它。**
+
 > 第 8 条的教训值得单独记一笔：`ast.parse` 通过并不代表代码能 import。任何把值编译成源码的地方（`scenes/`）都不能只用 `ast.parse` 断言，要么用 `python_literal()` 这类共享助手，要么真跑一次。
 
 | 15 | Task 18 | `tests/test_app.py` 的 `test_selftest_returns_nonzero_when_a_dependency_is_missing` 断言 `app.selftest(broken) == 2`，但 Task 18 建的 `tools/selftest.py` 按计划就是 `return 0` 的占位版（Task 19 才替换），该测试在 Task 18 **必然红**，与「每个任务真的走红→绿」的纪律冲突 | Task 18 的 `tests/test_app.py` **不含**这个测试（它的主题属于 Task 19，且 Task 19 的 `test_missing_ffmpeg_exits_two_and_creates_no_run` 已覆盖同一行为），Task 18 实际 7 passed（计划写 8 passed） |
