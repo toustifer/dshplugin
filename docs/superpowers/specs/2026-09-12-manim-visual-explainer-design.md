@@ -20,6 +20,7 @@
 2. 从模型决定画到动画出现在对话里，端到端 **≤ 20 秒**（draft 画质）。
 3. 模型生成的 Manim 代码首次成功率有保障：失败时能自我修复并重试，最终不静默放弃。
 4. 中文与 LaTeX 公式都能正确渲染。
+5. 产出的动画**不会随对话滚走**：DSH 页面里有一个常驻的「动画库」，能回看、检索、播放全部历史产物。
 
 ---
 
@@ -50,6 +51,7 @@
 - 一组高层声明式工具（模型几乎不写 Python）+ 一个任意代码逃生口。
 - 渲染产物的后处理（MP4 → GIF/WebP/PNG）与体积控制。
 - 失败诊断与自愈提示，让模型能自己修好代码。
+- 一个 DSH 原生插件（Host + Client），在 DSH 页面左侧栏提供常驻的「动画库」面板（见第 19 节）。
 - 一个 Skill，规定「什么时候画、怎么画才有效」。
 - 幂等的安装/卸载脚本与完整中文文档。
 
@@ -57,13 +59,21 @@
 
 - 语音合成、字幕、多段视频剪辑拼接。
 - ManimGL（3b1b 的私有分支）——社区版 Manim 才是本机可用且文档完善的。
-- Web 端可视化编辑器。
-- DSH Client 端精美播放卡片（架构留插槽，v2 再做）。
+- Web 端可视化编辑器（在浏览器里拖拽编辑场景）。
 - 视频云端上传/分享。
+- 动画的多幕编排（一次回答产出多条连贯动画）。
 
 ---
 
 ## 4. 总体架构
+
+本项目由三个组件构成：
+
+```
+组件 1：manim-mcp（Python MCP 服务，stdio）
+组件 2：dsh-manim-gallery（DSH 原生插件，Host + Client）
+组件 3：manim-explainer（Skill，行为层）
+```
 
 ```
 用户提问
@@ -85,15 +95,33 @@ DSH Agent（模型）
    │        ▼
    │    后处理：MP4 → GIF（两遍调色板）/ WebP / PNG 海报
    │        │
+   │        ├─ 更新 renders\index.json（动画库的数据源）
+   │        │
    │        ▼
    │    返回信封 { ok, runId, assets, previewMarkdown, ... }
    │        │
    │        └─ 同时返回 MCP image 内容块（GIF）→ 对话内直接显示动图
    │
-   └──► 模型把 previewMarkdown 贴进回复 → 同源 /api/file 兜底显示
+   ├──► 模型把 previewMarkdown 贴进回复 → 同源 /api/file 兜底显示
+   │
+   └──► 用户点左侧栏「动画库」图标
+            │
+            ▼
+        组件 2：dsh-manim-gallery（Client 半，注册 sidebar.panellist + main）
+            │  读 renders\index.json，用 <img>/<video> 指向 /api/file
+            ▼
+        全尺寸中央面板：网格预览 + 视频播放 + 检索 + 删除
 ```
 
-两条内嵌显示通道（详见第 12 节）：MCP image 内容块为主，回复内的绝对路径 Markdown 为兜底。**两条独立可用**，任一条失效不影响另一条。
+### 4.1 三条显示通路
+
+| 通路 | 载体 | 特点 |
+|---|---|---|
+| A：MCP image 内容块 | 工具结果 | 对话内直接显示动图，随对话滚动 |
+| B：回复内 Markdown | 助手消息文本 | 兜底，与模型图片能力无关 |
+| C：动画库面板 | 左侧栏全尺寸页面 | **常驻、不随对话滚走**，可检索、可播放 MP4 |
+
+A 与 B 详见第 12 节，C 详见第 19 节。**三条互相独立**，任一条失效不影响其余。
 
 ---
 
@@ -112,6 +140,7 @@ D:\myprogram\dshplugin\
 │  ├─ engine\
 │  │  ├─ __init__.py
 │  │  ├─ workspace.py                 run 目录生命周期、命名、保留与清理
+│  │  ├─ index.py                     维护 renders\index.json（动画库数据源）
 │  │  ├─ render.py                    写 scene.py → 调 manim 子进程 → 收产物
 │  │  ├─ postprocess.py               MP4 → GIF/WebP/PNG 与体积控制链
 │  │  └─ diagnostics.py               stderr/traceback → 结构化错误 + 修复提示
@@ -128,12 +157,21 @@ D:\myprogram\dshplugin\
 │     ├─ check.py                     check
 │     ├─ style_guide.py               style_guide
 │     └─ runs.py                      runs
+├─ dsh-manim-gallery\                 DSH 原生插件（组件 2，见第 19 节）
+│  ├─ package.json                    dsh.bundle.patch + dsh.client{platform:web, inject}
+│  ├─ cordis.patch.yml                - insert: [{id: dsh-manim-gallery, name: ...}]
+│  ├─ README.md
+│  └─ lib\
+│     ├─ index.js                     Host 半（无副作用，保留扩展位）
+│     └─ client.js                    手写 window.__ModuleLoader__ 模块，无构建步骤
 ├─ skills\manim-explainer\SKILL.md    行为层（安装时复制到 ~/.dsh/skills/）
 ├─ renders\                           渲染产物（gitignore，可随时清空）
+│  └─ index.json                      动画库元数据索引（由 MCP 维护）
 └─ tests\
    ├─ test_diagnostics.py
    ├─ test_postprocess.py
    ├─ test_workspace.py
+   ├─ test_index.py
    ├─ test_scenes.py
    └─ fixtures\
 ```
@@ -312,6 +350,46 @@ renders\<runId>\
 - 并发默认 **1**（`asyncio.Semaphore`）。串行化避免多个 Manim 同时把 CPU 吃满，也避免模型一次发多个动画时互相拖慢。
 - 超时默认 **180 秒**，可配。超时返回 `stage: "timeout"` 与已产生的部分 stderr。
 - 保留策略：默认保留最近 **50** 个 run，超出的按时间从旧到新删除。清理在每次渲染完成后惰性执行，失败不影响本次渲染。
+  - 该策略同时决定动画库面板里能看到多少条历史。用户若希望长期留存作品，把 `MANIM_MCP_KEEP_RUNS` 调大或设为 `0`（表示不清理）。
+
+### 7.4 元数据索引 `index.json`
+
+动画库面板（第 19 节）的数据源。每次渲染**成功或失败**后由 `engine\index.py` 增量更新，位于 `renders\index.json`：
+
+```json
+{
+  "version": 1,
+  "updatedAt": "2026-09-12T15:30:14+08:00",
+  "runs": [
+    {
+      "runId": "20260912-153012-a1b2",
+      "tool": "equation",
+      "sceneName": "Equation",
+      "title": "欧拉恒等式的由来",
+      "status": "ok",
+      "quality": "draft",
+      "createdAt": "2026-09-12T15:30:12+08:00",
+      "durationSec": 10.4,
+      "renderSeconds": 9.8,
+      "assets": {
+        "preview": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.gif",
+        "previewKind": "gif",
+        "mp4": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.mp4",
+        "poster": "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\Equation.png"
+      },
+      "previewUrlPath": "/D:/myprogram/dshplugin/renders/20260912-153012-a1b2/out/Equation.gif",
+      "args": { "steps": 4 },
+      "sessionId": "…",
+      "warnings": []
+    }
+  ]
+}
+```
+
+- `args` 只存**参数摘要**（步数、表达式条数等），不存完整 LaTeX 源码；完整源码在 `renders\<runId>\scene.py`。
+- 失败的 run 也入索引（`status: "failed"`），但面板默认过滤掉，便于排查「为什么那次没出图」。
+- 写入用**原子替换**（写临时文件 + `os.replace`），避免面板读到半个文件。
+- 索引与目录不一致时（例如手动删了 run 目录），面板以「目录扫描」结果为准做一次对账。
 
 ---
 
@@ -455,7 +533,9 @@ Manim 的 `Text` 默认字体不含中文，会渲染成方框。方案：
 
 ---
 
-## 12. 内嵌预览通道（关键可行性依据）
+## 12. 对话内预览通道（关键可行性依据）
+
+> 本节的 A、B 两条是**对话内**的显示通路。第三条通路是常驻的「动画库」面板，见第 19 节。
 
 ### 通道 A：MCP image 内容块（主）
 
@@ -481,6 +561,17 @@ Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `w
 信封里的 `previewMarkdown` 就是按这个格式生成的，模型只需原样粘贴。
 
 > 由此产生的硬约束：产物路径不能含空格、括号、中文——已在 7.1 节通过 run 命名规则保证。
+
+### 通道 C：`/api/file` 的官方契约
+
+通道 B 与动画库面板（第 19 节）都依赖同一个接口。官方文档（`dsh-api-session-controller/README.md`）原文：
+
+> `SessionMediaReferences` mounts `GET|HEAD /api/file?path=<absolute path>` on the **authenticated `connection.fetch` channel** when `connection`, `fs`, and `attachments` are composed. It reads ordinary files through `ctx.fs`, including temporary paths outside registered workspaces and files in remote providers. **Neither directory containment nor MIME categories restrict access**; `mime-types` supplies the response type, with `application/octet-stream` for unknown extensions. GET reuses `readBytes` for preflight and ongoing byte limits; HEAD reads metadata only. All files use `ctx.attachments.imageLimits.maxImageBytes` (normally 20 MiB); exceeding this limit returns 413. Responses contain the complete file, ignore Range, and carry `private, no-store`, `nosniff`, and a sandbox CSP so directly opened HTML/SVG cannot execute with the API origin. … **audio/video responses are available** …
+
+三条结论：
+1. 该接口挂在**已鉴权的连接通道**上，页面内的 `<img>` / `<video>` / `fetch` 自动带鉴权（鉴权是 `dsh-auth-*` cookie 或 `token` 查询参数，`dsh-client-connection` 定义）。**未带凭据的裸请求会得到 401**（已实测），因此不能从 DSH 之外直接访问。
+2. **不受目录包含限制**，所以 `D:\myprogram\dshplugin\renders\...` 可以直接读。
+3. **音视频响应可用**，所以面板里能用 `<video controls>` 播放 MP4；受限的是「Markdown 里的音视频播放器节点仍未实现」，即 `![x](a.mp4)` 不会渲染播放器——自定义组件不受此限。
 
 ---
 
@@ -513,15 +604,25 @@ Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `w
 
 > `env` 必须显式传入：`dsh-mcp-client` 会给子进程一个**清洗过**的环境（凭据形状与陈旧 `DSH_*` 变量被丢弃），不显式传会有 PATH 风险。
 
-5. **安装 Skill**：复制 `skills\manim-explainer` → `~/.dsh/skills\manim-explainer`（已存在则先备份）。
-6. **自检**：运行 `python manim-mcp\server.py --selftest`，做一次真实的小场景渲染并打印产物路径。
-7. **提示重启**：明确告知需要重启 dsh web 才生效。
+5. **安装动画库插件**（组件 2，详见第 19 节）：
+   a. 复制 `dsh-manim-gallery\` → `~/.dsh/plugins\dsh-manim-gallery\`。
+   b. 备份 `~/.dsh/profiles/web/package.json`。
+   c. 在 `dsh.profile.bundles` 数组追加 `"dsh-manim-gallery"`；在 `dependencies` 追加 `"dsh-manim-gallery": "link:C:/Users/15775/.dsh/plugins/dsh-manim-gallery"`（**保留原有条目与顺序**，只追加）。
+   d. 在 `~/.dsh/profiles/web` 运行 `pnpm install`（`link:` 是本地链接，不走网络）。若 pnpm 不可用则退化为在 `node_modules` 下手动建符号链接（与 pnpm 的 `nodeLinker: hoisted` 结果等价）。
+   e. 校验 `node_modules\dsh-manim-gallery` 存在且为链接。
+6. **安装 Skill**：复制 `skills\manim-explainer` → `~/.dsh/skills\manim-explainer`（已存在则先备份）。
+7. **自检**：
+   - `python manim-mcp\server.py --selftest` —— 真实渲染一个小场景并打印产物路径与 `index.json` 条目。
+   - 校验 `renders\index.json` 可被解析、且列出的产物文件确实存在。
+8. **提示重启**：明确告知需要重启 dsh web 才生效，并说明重启后左侧栏应出现「动画库」图标。
 
 ### 13.2 `uninstall.ps1`
 
 - 按 `id: mcp-manim` **精确删除**该 insert 块（用 YAML 解析，不靠字符串匹配），保留其它配置与注释。
+- 从 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles` 与 `dependencies` 中**精确移除** `dsh-manim-gallery` 两项，其余保持原样与原顺序。
+- 删除 `node_modules\dsh-manim-gallery` 链接与 `~/.dsh/plugins\dsh-manim-gallery` 目录。
 - 删除 `~/.dsh/skills\manim-explainer` 副本。
-- `renders\` 默认保留，加 `-PurgeRenders` 才删除。
+- `renders\` 默认保留（动画作品不该被卸载脚本删掉），加 `-PurgeRenders` 才删除。
 - **绝不触碰 shipped preset 与任何部署自带目录。**
 
 ---
@@ -540,7 +641,7 @@ Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `w
 | `MANIM_MCP_TIMEOUT_SEC` | `180` | 单次渲染超时 |
 | `MANIM_MCP_GIF_TARGET_BYTES` | `8388608`（8MB） | GIF 目标体积 |
 | `MANIM_MCP_GIF_MAX_BYTES` | `18874368`（18MB） | GIF 硬上限，超则降级 |
-| `MANIM_MCP_KEEP_RUNS` | `50` | 保留的 run 数量 |
+| `MANIM_MCP_KEEP_RUNS` | `50` | 保留的 run 数量；`0` 表示不清理（动画库会一直累积） |
 | `MANIM_MCP_LOG_LEVEL` | `INFO` | 日志级别（写 stderr，不污染 stdout 的 MCP 帧） |
 
 > MCP stdio 的 stdout 是协议通道，**任何日志只能走 stderr**。
@@ -558,7 +659,10 @@ Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `w
 | ffmpeg 不可用 | 仍返回 MP4，`preview` 指向 PNG 海报，`warnings` 说明 |
 | 中文字体缺失 | 回退 `sans-serif` 并 `warnings` 提示可能显示为方框 |
 | 产物目录不可写 | 返回明确错误，提示检查 `MANIM_MCP_RENDER_ROOT` 权限 |
+| `index.json` 写入失败 | 渲染结果照常返回（`ok: true`），`warnings` 记录索引未更新；面板下次靠目录对账恢复 |
+| `index.json` 损坏或缺失 | 面板显示错误态与「重新扫描」；对话内通路不受影响 |
 | MCP 服务启动即失败 | `failOnStartupError: true` 让 DSH 在重启时立刻报错，而不是静默无工具 |
+| 动画库插件未安装或加载失败 | 对话内 A/B 通路照常工作，只是没有常驻面板 |
 
 ---
 
@@ -569,11 +673,12 @@ Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `w
 - `test_diagnostics.py`：喂入真实 stderr 样本（含 traceback、ANSI、进度条噪声），断言解析出的类型/行号/hint。
 - `test_postprocess.py`：mock ffmpeg，断言降级链依次尝试 fps/宽度的组合，且在硬上限处正确切到 WebP、再切到 PNG。
 - `test_workspace.py`：runId 命名合法（无空格/括号/中文）、保留策略按时间正确删除、run.json 往返一致。
+- `test_index.py`：索引增量更新正确（成功与失败都入索引）、删除 run 后条目同步、写入是原子的（并发读不会拿到半个文件）、损坏索引能被重建。
 - `test_scenes.py`：4 个模板对给定入参生成的代码能被 `ast.parse`，且包含必需结构；对非法入参给出可读错误。
 
 ### 16.2 端到端测试
 
-- `python manim-mcp\server.py --selftest`：真实渲染一个「中文标题 + LaTeX 公式 + 图形」的场景，断言 MP4/GIF 产出、GIF < 18MB、`previewMarkdown` 路径存在且文件可读。
+- `python manim-mcp\server.py --selftest`：真实渲染一个「中文标题 + LaTeX 公式 + 图形」的场景，断言 MP4/GIF 产出、GIF < 18MB、`previewMarkdown` 路径存在且文件可读、`index.json` 出现对应条目。
 - 渲染耗时打印，作为性能回归基线（热态应 ≤ 20 秒）。
 
 ### 16.3 浏览器验收（必须做）
@@ -581,20 +686,23 @@ Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `w
 1. 重启 dsh web。
 2. 新开对话，问一个「值得画」的问题（例如「为什么 e^{iπ}+1=0」）。
 3. 断言：动画**内嵌显示**在对话里、可动、路径与 `previewMarkdown` 一致。
-4. 断言：Disable 掉 image 通道（切换到纯文本模型）后，通道 B 的 Markdown 仍能显示。
+4. 断言：切到纯文本模型后，通道 B 的 Markdown 仍能显示。
+5. 断言：左侧栏出现「动画库」图标，点开后中央面板列出刚才那条动画，GIF 自动播放，点开能用 `<video>` 播放 MP4。
+6. 断言：面板的搜索 / 类型筛选 / 排序 / 删除都生效，且删除后 `index.json` 与目录同步更新。
 
 ---
 
 ## 17. 验收标准
 
-1. `install.ps1` 在干净环境一次跑通，重启后 `mcp__manim__*` 工具出现在工具列表中。
+1. `install.ps1` 在干净环境一次跑通，重启后 `mcp__manim__*` 工具出现在工具列表中，且左侧栏出现「动画库」图标。
 2. 4 个高层工具各自能产出正确动画（人工看一遍 4 段产物）。
 3. 含中文与公式的场景渲染正确，无方框、无乱码。
 4. 故意给一段有错的 Manim 代码，返回的信封含正确行号与可执行 hint。
 5. 单个动画端到端 ≤ 20 秒（draft，热态）。
 6. 对话内动画正常内嵌显示。
-7. `uninstall.ps1` 跑完后 `cordis.patch.yml` 与安装前**逐字节等价**（除备份文件外）。
-8. `pytest` 全绿。
+7. 动画库面板：列表与 `renders\` 实际内容一致，GIF 预览自动播放，MP4 可暂停/拖进度，删除后两边同步。
+8. `uninstall.ps1` 跑完后 `cordis.patch.yml` 与 `package.json` 均与安装前**逐字节等价**（除备份文件外），`node_modules` 中无残留链接。
+9. `pytest` 全绿。
 
 ---
 
@@ -608,6 +716,9 @@ Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `w
 | 复杂场景渲染时间不可控 | 超时 | 180 秒超时 + 模板本身限制复杂度（单想法原则） |
 | MiKTeX 在某些沙箱策略下无法写自身日志 | LaTeX 全挂 | MCP 由 DSH Host 直接拉起，不受工具沙箱限制；已在 full-access 下实测通过 |
 | MCP 工具数量占用上下文 | 略增提示成本 | 工具名精简、描述精炼；重的风格内容放 Skill 而非工具描述 |
+| **安装面变大**：除 `cordis.patch.yml` 外还要改 profile 的 `package.json` 并跑 `pnpm install` | 安装/卸载出错会污染用户 profile | 两步都先备份；只用「精确追加/精确移除」而不重写文件；卸载后做等价性校验；`package.json` 用 JSON 解析而非字符串替换 |
+| **面板依赖 `index.json` 与目录一致** | 索引损坏时面板空白 | MCP 侧原子写入；面板侧以目录扫描次数做对账；损坏时显示错误态与「重新扫描」 |
+| DSH 前端内部 API（`window.__ModuleLoader__`、槽位契约）随版本变化 | 面板在某次 DSH 升级后失效 | 面板与 MCP 完全解耦：面板失效时对话内 A/B 两条通路照常工作；面板代码集中在单个 `client.js`，修复面小 |
 
 ### 未决项
 
@@ -615,9 +726,96 @@ Host 侧 `/api/file` 接收入参后用 `path.resolve(cwd, p)`，而 Node 的 `w
 
 ---
 
-## 19. v2 预留（不在本次范围）
+## 19. 动画库面板（DSH 原生插件）
 
-- DSH Client 插件：把动画渲染成带播放控制的工具卡片（可暂停、逐帧、全屏）。
+### 19.1 为什么需要它
+
+对话内嵌的动画（第 12 节 A/B）会随对话滚动而离开视野。用户明确要求动画能**保留在 DSH 页面里**长期回看。DSH 提供了正好对应的接口。
+
+### 19.2 依据（来自 DSH 槽位目录与实际调用点）
+
+| 事实 | 来源 |
+|---|---|
+| `sidebar.panellist`（list，root 作用域）：「Global panel icons. **Each list id addresses the matching main panel**; the sidebar owns the button and resolves its label from list metadata.」注册参数 `id`(必填) / `order` / `label`；图标组件收到 ownerProps `{size, active}` | 槽位目录 |
+| `main`（keyed，root 作用域）：「Central panel selected by sidebar entry id.」key 域开放，`conversation` 已被占用 | 槽位目录 |
+| 布局层实现：`renderSlot("main", {}, { entryKey: usePanelInfo((info) => info.activePanelId) ?? "conversation" })`；侧栏对每个 panel 调 `renderSlot("sidebar.panellist", {size, active}, {only: id})` 并 `selectPanel(id)` | `dsh-client-ui-layout` / `dsh-client-ui-sidebar` 源码 |
+| keyed 槽位注册形状：`ctx.slots.register({ name, key, … }, Component)`；list 槽位用 `{ name, id, order, label }` | `dsh-client-ui-cordis` / `dsh-cross-session-modal` 源码 |
+
+结论：注册 `sidebar.panellist{id:"manim-gallery"}` + `main{key:"manim-gallery"}` 即可得到一个带图标与标签、可点击进入的全尺寸中央面板。**无需修改或替换任何 shipped UI**（两个槽位的 `replaceRisk` 分别为 `none` 与 `shadows-shipped-ui`，而后者只在占用已存在的 key 时才发生——我们用的是全新 key）。
+
+### 19.3 数据通路
+
+```
+manim-mcp 渲染完成
+   → 更新 renders\index.json（原子替换，见 7.4）
+        │
+        ▼
+面板组件挂载 / 点刷新
+   → fetch("/api/file?path=" + encodeURIComponent("/D:/myprogram/dshplugin/renders/index.json"))
+   → 拿到 runs[]
+        │
+        ▼
+每个卡片：<img src="/api/file?path=" + encodeURIComponent(run.assets.preview)>
+详情视图：<video controls src="/api/file?path=" + encodeURIComponent(run.assets.mp4)>
+```
+
+- **不需要自定义 Host RPC。** `/api/file` 已在已鉴权通道上，能读任意绝对路径，且支持音视频。
+- Host 半（`lib/index.js`）保持空实现，仅作为将来需要 Host 能力时的扩展位。
+- 鉴权由页面的 `dsh-auth-*` cookie 自动携带，与对话内的图片显示走同一套机制。
+
+### 19.4 界面
+
+**图标**（`sidebar.panellist` 单元）：一个简洁的线稿图标，随 `active` 状态变色，用 `--dsw-*` 主题 token 而非硬编码颜色。
+
+**面板**（`main` 单元）：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 动画库                      [搜索…]  [类型▾] [排序▾] [⟳] │
+├─────────────────────────────────────────────────────────┤
+│ ┌───────────┐ ┌───────────┐ ┌───────────┐              │
+│ │  [GIF]    │ │  [GIF]    │ │  [GIF]    │              │
+│ ├───────────┤ ├───────────┤ ├───────────┤              │
+│ │公式推导    │ │函数图像    │ │流程结构    │              │
+│ │欧拉恒等式  │ │sin 与切线  │ │快排分治    │              │
+│ │12s · 3 分钟前│ │9s · 1 小时前││15s · 昨天 │              │
+│ └───────────┘ └───────────┘ └───────────┘              │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **网格卡片**：GIF 自动播放（`loading="lazy"`）、标题、类型徽章、时长与相对时间。
+- **点击卡片 → 详情视图**（在同一面板内切换，不新开路由）：
+  - 大尺寸预览：默认 GIF，可切到 `<video controls>` 播放 MP4（可暂停、拖进度——这是 GIF 做不到的）。
+  - 元信息：类型、画质、耗时、体积、生成时间、参数摘要。
+  - 「查看代码」：读取同 run 的 `scene.py` 并展示（只读代码块）。
+  - 操作：复制 GIF 路径 / 复制 Markdown 引用 / 在资源管理器中打开 / 删除。
+- **顶部工具条**：关键词搜索（标题 + 类型）、按类型筛选、按时间或体积排序、手动刷新。
+- **空态**：「还没有动画。去问一个值得画的问题吧。」
+- **错误态**：`index.json` 读取失败或损坏时，显示明确原因与「重新扫描」按钮，并提示对话内的动画不受影响。
+
+### 19.5 实现约束
+
+- 单个 `lib/client.js`，手写 `window.__ModuleLoader__.load({id, factory})` 形式，**无构建步骤**（与 `dsh-cross-session-modal` 同款）。
+- 样式用注入 `<style data-plugin-css=...>` 的方式，类名带前缀；颜色全部走 `--dsw-*` 变量以跟随明暗主题。
+- `apply(ctx)` 内所有注册都必须可回收：用 `ctx.slots.inject(name, () => ctx.slots.register(...))`，返回值交由 Cordis 管理生命周期。
+- `exports.inject = ["slots"]`（若需读取会话信息再加 `sessions`）。
+- 面板不做轮询：仅在挂载、点击刷新、以及窗口重新获得焦点时读取 `index.json`。
+- 删除操作**只删除 run 目录与索引条目**，不做二次确认弹窗以外的额外动作；删除失败要回滚 UI 状态并提示。
+
+### 19.6 与 MCP 的解耦
+
+面板只是 `renders\index.json` 的只读消费者。因此：
+
+- 面板坏了，渲染与对话内显示照常工作。
+- 手动删掉 `renders\` 后，面板显示空态，下次渲染自动重建索引。
+- 面板对 MCP 版本无依赖，MCP 对面板存在与否无感知。
+
+---
+
+## 20. v2 预留（不在本次范围）
+
 - 动画序列：一次回答产出多幕连贯动画。
 - 交互式参数：用户拖动滑块改变参数并重渲染。
 - 缓存层：相同场景代码命中缓存直接复用 MP4。
+- 面板内导出：一键导出 MP4 / 打包多条动画。
+- 面板内重渲染：改参数后从面板直接再跑一次。
