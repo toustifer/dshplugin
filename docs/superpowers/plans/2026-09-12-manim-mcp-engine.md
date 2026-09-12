@@ -6406,6 +6406,9 @@ git commit -m "docs(manim-mcp): 组件文档与 stdio 冒烟脚本"
 | 8 | Task 11 | **只有真机渲染能发现的缺陷**：`diagram.py` 的 `_literal` 用 `json.dumps`，无边标签的边生成 `("in", "pivot", null)`。`ast.parse` **通过**（`null` 是合法标识符），但 Manim import 时 `NameError: name 'null' is not defined` | `style.py` 新增 `python_literal()`（正确处理 `None`/`True`/`False`），`diagram._literal` 委托给它；新增 `tests/test_scene_codegen.py` 对**全部四个模板**断言 AST 中不出现 `null`/`true`/`false` 这三个名字 |
 | 9 | Task 11 | **画面目视验收发现的缺陷**：边以「方框中心 → 方框中心」直连，反向边（循环）直穿中间所有方框、标签压在节点上——框图反而更难读 | 正向边锚在相向的方框边缘（不穿框）；反向边沿列外侧弓形绕行（`path_arc`），标签移到列外 |
 | 10 | Task 11 | **画面目视验收发现的缺陷**：方框宽度按 `0.34 * len(label)` 估算，这是拉丁字符的系数；中文标签（如「递归处理两侧」）贴到框边 | 模板内新增 `label_width()`，CJK 字符按约 1.9 倍字宽计（`ord(ch) > 0x2E80` 判定） |
+| 11 | Task 14 | `check.py` 用字面量 `IMPORT_HINT not in code` 判断是否导入了 manim，于是 `import manim` + `class Demo(manim.Scene)` 这种**完全能渲染**的代码被判为「缺少 import」，`test_qualified_scene_base_is_recognised` 的 `ok is True` 无法满足（实现错，非测试错——该测试的意图正是「限定名基类应被识别」） | `check.py` 新增 AST 版 `_imports_manim()`：`import manim` / `import manim.*` / `from manim[.*] import ...` 都算已导入；issue 文案仍含 `from manim import *`，故 `test_missing_manim_import_is_reported` 不受影响 |
+| 12 | Task 16 | `execute()` 无条件调用 `postprocess.probe_duration(cfg.ffmpeg, ...)`。`cfg.ffmpeg` 非空但该二进制不存在时（测试配置里就是假路径）`subprocess.run` 抛 `FileNotFoundError`，把一个已经成功的渲染变成未捕获异常——12 个 pipeline 测试全部红（实现错，且违反本文件自己写下的「次要步骤失败只降级为 warning」） | 时长探测包 `try/except`，失败降级为一条 warning 而不是抛出；**不改 `engine/postprocess.py`**（该模块已有测试且契约是「ffmpeg 说不出来就返回 0.0」，此处补的是调用侧的容错） |
+| 13 | Task 13 / 14 / 17 | Step 4 的 `Expected: PASS（N passed）` 与计划自己给出的测试代码数量不符：Task 13 写 14（实际 13 个测试）、Task 14 写 16（实际 18 个）、Task 17 写 19（实际 17 个）。Task 15（12）与 Task 16（14）计数正确 | 以计划正文的测试代码为准执行，不为了让数字对上而增删断言；实际结果为 Task 13 = 13、Task 14 = 18、Task 17 = 17 |
 
 **新增的验收工具**：`tests/manual/render_templates.py` —— 用真机 Manim 把四个模板（外加参数滑动的 graph）各渲染一次。第 8/9/10 条缺陷全是它发现的，而单元测试**全都漏掉了**。**改动 `manim_mcp/scenes/` 之后必须跑它。**
 
