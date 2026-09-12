@@ -14,10 +14,12 @@ import depend on who ran first.
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 import json
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -469,3 +471,78 @@ def _unlink_package(targets: Targets) -> None:
             shutil.rmtree(link)
     except OSError:
         pass
+
+
+def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--profile-root", required=True, type=Path)
+    parser.add_argument("--plugin-root", type=Path, default=Path.home() / ".dsh" / "plugins")
+    parser.add_argument("--skill-root", type=Path, default=Path.home() / ".dsh" / "skills")
+    parser.add_argument("--source-root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--render-root", required=True, type=Path)
+    parser.add_argument("--python", default=sys.executable)
+    parser.add_argument("--manim", default=None)
+    parser.add_argument("--ffmpeg", default=None)
+    parser.add_argument("--dry-run", action="store_true")
+
+
+def _targets_from(args: argparse.Namespace) -> Targets:
+    source = args.source_root.resolve()
+    if not (source / GALLERY_PACKAGE).is_dir():
+        raise InstallerError(
+            f"--source-root {source} does not contain {GALLERY_PACKAGE}/; "
+            "point it at the directory that holds this repository"
+        )
+    if not (source / "manim-mcp" / "server.py").is_file():
+        raise InstallerError(f"--source-root {source} does not contain manim-mcp/server.py")
+    # Checked here rather than left to the JSON parser: a wrong --profile-root is
+    # the likeliest mistake, and "not valid JSON" for a missing file sends the
+    # reader looking in the wrong place.
+    if not (args.profile_root / "package.json").is_file():
+        raise InstallerError(
+            f"--profile-root {args.profile_root} has no package.json; point it at a "
+            "DSH profile directory (normally ~/.dsh/profiles/web)"
+        )
+    return Targets(
+        profile_root=args.profile_root,
+        plugin_root=args.plugin_root,
+        skill_root=args.skill_root,
+        source_root=source,
+        render_root=args.render_root,
+        python=args.python,
+        manim=args.manim,
+        ffmpeg=args.ffmpeg,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="dsh_installer",
+        description="Mount or remove the Manim explainer MCP, panel, and skill.",
+    )
+    subparsers = parser.add_subparsers(dest="action", required=True)
+    _add_common_arguments(subparsers.add_parser("install"))
+    uninstall = subparsers.add_parser("uninstall")
+    _add_common_arguments(uninstall)
+    uninstall.add_argument("--purge-renders", action="store_true")
+
+    args = parser.parse_args(argv)
+    try:
+        targets = _targets_from(args)
+        if args.action == "install":
+            plan = plan_install(targets) if args.dry_run else apply_install(targets)
+        else:
+            plan = (
+                plan_uninstall(targets)
+                if args.dry_run
+                else apply_uninstall(targets, purge_renders=args.purge_renders)
+            )
+    except InstallerError as error:
+        print(f"installer: {error}", file=sys.stderr)
+        return 2
+
+    print(json.dumps(plan, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
