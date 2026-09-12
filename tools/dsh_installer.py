@@ -225,3 +225,247 @@ def patch_client_render_root(text: str, render_root: Path) -> tuple[str, bool]:
         lambda m: f'{m.group("indent")}const RENDER_ROOT = "{wanted}";', text, count=1
     )
     return replaced, True
+
+
+@dataclass
+class Step:
+    """One planned filesystem action."""
+
+    kind: str
+    detail: dict = field(default_factory=dict)
+
+    def as_dict(self) -> dict:
+        return {"kind": self.kind, **self.detail}
+
+
+def _timestamp() -> str:
+    from datetime import datetime
+
+    return datetime.now().strftime("%Y%m%d%H%M%S")
+
+
+def _read(path: Path, default: str = "") -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return default
+
+
+def plan_install(targets: Targets) -> dict:
+    """Everything `apply_install` will do, as data.
+
+    Every step is always listed, each carrying its own `changed` flag. Filtering
+    the list down to "what actually changes" reads better but cannot be asserted
+    on: a re-install still has to *replace* the MCP row (removing it and appending
+    it again is how idempotence is achieved), so the row appears either way.
+    """
+    patch_text = _read(targets.patch_file)
+    _, replaced = remove_insert_block(patch_text, MANIM_BLOCK_ID)
+
+    _, package_changed = plan_package_json(
+        _read(targets.profile_package), plugin_dir=targets.plugin_dir
+    )
+
+    render_root_wanted = f'const RENDER_ROOT = "{targets.render_root.as_posix()}";'
+    render_root_changed = render_root_wanted not in _read(targets.client_file)
+
+    steps = [
+        Step("backup", {"path": str(targets.patch_file)}),
+        Step("yaml-insert", {"id": MANIM_BLOCK_ID, "replaced": replaced}),
+        Step(
+            "copy-plugin",
+            {
+                "from": str(targets.source_root / GALLERY_PACKAGE),
+                "to": str(targets.plugin_dir),
+                "changed": not targets.plugin_dir.exists(),
+            },
+        ),
+        Step("patch-package-json", {"changed": package_changed}),
+        Step(
+            "patch-render-root",
+            {"changed": render_root_changed or not targets.client_file.exists()},
+        ),
+        Step(
+            "link-package",
+            {
+                "package": GALLERY_PACKAGE,
+                "cwd": str(targets.profile_root),
+                "changed": not targets.module_link.exists(),
+            },
+        ),
+        Step(
+            "copy-skill",
+            {
+                "from": str(targets.source_root / "skills" / SKILL_NAME),
+                "to": str(targets.skill_dir),
+                "changed": not targets.skill_dir.exists(),
+            },
+        ),
+        Step(
+            "verify-selftest",
+            {
+                "command": [
+                    targets.python,
+                    str(targets.source_root / "manim-mcp" / "server.py"),
+                    "--selftest",
+                ]
+            },
+        ),
+    ]
+    changed = any(step.detail.get("changed") is True for step in steps)
+    return {
+        "action": "install",
+        "changed": changed,
+        "steps": [step.as_dict() for step in steps],
+    }
+
+
+def plan_uninstall(targets: Targets) -> dict:
+    _, present = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    _, package_changed = plan_package_json(
+        _read(targets.profile_package), plugin_dir=targets.plugin_dir, remove=True
+    )
+    steps = [
+        Step("backup", {"path": str(targets.patch_file)}),
+        Step("yaml-remove", {"id": MANIM_BLOCK_ID, "present": present, "changed": present}),
+        Step("remove-package-json-entry", {"changed": package_changed}),
+        Step(
+            "remove-plugin-dir",
+            {"path": str(targets.plugin_dir), "changed": targets.plugin_dir.exists()},
+        ),
+        Step(
+            "remove-skill-dir",
+            {"path": str(targets.skill_dir), "changed": targets.skill_dir.exists()},
+        ),
+        Step(
+            "unlink-package",
+            {
+                "package": GALLERY_PACKAGE,
+                "cwd": str(targets.profile_root),
+                "changed": targets.module_link.exists() or targets.module_link.is_symlink(),
+            },
+        ),
+    ]
+    changed = any(step.detail.get("changed") is True for step in steps)
+    return {
+        "action": "uninstall",
+        "changed": changed,
+        "steps": [step.as_dict() for step in steps],
+    }
+
+
+def _backup(path: Path) -> Path | None:
+    if not path.exists():
+        return None
+    target = path.with_name(f"{path.name}.bak-{_timestamp()}")
+    shutil.copy2(path, target)
+    return target
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def apply_install(targets: Targets, *, copy_plugin: bool = True, link: bool = True) -> dict:
+    """Perform the install. Returns the plan that was executed."""
+    plan = plan_install(targets)
+    _backup(targets.patch_file)
+
+    stripped, _ = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    if stripped and not stripped.endswith("\n"):
+        stripped += "\n"
+    _write(targets.patch_file, stripped + build_manim_insert_block(targets))
+
+    if copy_plugin:
+        if targets.plugin_dir.exists():
+            shutil.rmtree(targets.plugin_dir)
+        shutil.copytree(
+            targets.source_root / GALLERY_PACKAGE,
+            targets.plugin_dir,
+            ignore=shutil.ignore_patterns("test", "node_modules", "__pycache__"),
+        )
+
+    package_path = targets.profile_package
+    _backup(package_path)
+    planned, _ = plan_package_json(_read(package_path), plugin_dir=targets.plugin_dir)
+    _write(package_path, planned)
+
+    # Guarded because the file-surgery tests run without a copy, and
+    # `patch_client_render_root` refuses to guess when its line is absent.
+    if targets.client_file.exists():
+        patched, _ = patch_client_render_root(
+            _read(targets.client_file), targets.render_root
+        )
+        _write(targets.client_file, patched)
+
+    source_skill = targets.source_root / "skills" / SKILL_NAME
+    if source_skill.exists():
+        if targets.skill_dir.exists():
+            shutil.rmtree(targets.skill_dir)
+        shutil.copytree(source_skill, targets.skill_dir)
+
+    if link:
+        _link_package(targets)
+    return plan
+
+
+def apply_uninstall(targets: Targets, *, purge_renders: bool = False) -> dict:
+    plan = plan_uninstall(targets)
+    _backup(targets.patch_file)
+
+    stripped, _ = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    _write(targets.patch_file, stripped)
+
+    package_path = targets.profile_package
+    if package_path.exists():
+        _backup(package_path)
+        planned, _ = plan_package_json(
+            _read(package_path), plugin_dir=targets.plugin_dir, remove=True
+        )
+        _write(package_path, planned)
+
+    shutil.rmtree(targets.plugin_dir, ignore_errors=True)
+    shutil.rmtree(targets.skill_dir, ignore_errors=True)
+    _unlink_package(targets)
+    if purge_renders:
+        shutil.rmtree(targets.render_root, ignore_errors=True)
+    return plan
+
+
+def _link_package(targets: Targets) -> None:
+    """Create the node_modules link pnpm would create for a `link:` dependency.
+
+    Done directly rather than by shelling out to pnpm: the link is one symlink,
+    and requiring a package manager to install a local directory would make the
+    installer fail on a machine that has node but not pnpm.
+    """
+    targets.profile_root.mkdir(parents=True, exist_ok=True)
+    node_modules = targets.profile_root / "node_modules"
+    node_modules.mkdir(parents=True, exist_ok=True)
+
+    link = targets.module_link
+    if link.is_symlink() or link.is_file():
+        link.unlink()
+    elif link.is_dir():
+        shutil.rmtree(link)
+
+    try:
+        link.symlink_to(targets.plugin_dir, target_is_directory=True)
+    except OSError as error:
+        raise InstallerError(
+            f"cannot create the node_modules link {link}: {error}. "
+            "On Windows this needs Developer Mode or an elevated shell; "
+            "alternatively run `pnpm install` in the profile directory."
+        ) from error
+
+
+def _unlink_package(targets: Targets) -> None:
+    link = targets.module_link
+    try:
+        if link.is_symlink() or link.is_file():
+            link.unlink()
+        elif link.is_dir():
+            shutil.rmtree(link)
+    except OSError:
+        pass
