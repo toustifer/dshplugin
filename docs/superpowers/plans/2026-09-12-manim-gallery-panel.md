@@ -1530,8 +1530,9 @@ git commit -m "docs(manim-gallery): 组件说明、数据通路与只读边界"
 | 11 | 后续需求（入口位置） | 用户反馈「我没有看到点开之后有动画库之类的」，并要求「或者你可以把动画库放到右上角这里」 | 除左侧栏常驻图标外，再注册 `conversation.session.header.utilities`（右对齐、会话级）的「动画库」按钮作为**第二入口**；两个入口调同一个 `openGalleryPanel` |
 | 12 | 后续需求（可验证性） | 客户端插件跑在浏览器里，离线测试只能覆盖纯函数，无法证明它真的挂上了槽位 | `publishProbe(services)` 把面板状态挂到 `globalThis.__DSH_MANIM_GALLERY__`，使槽位注册与右栏可用性可被外部查询验证；这是**诊断面**，不参与业务逻辑 |
 | 13 | 后续需求（撤销入口） | 第 11 条刚加上右上角入口、左侧栏图标也一直在。但正文内嵌通道打通并被用户确认可见后，用户要求「左边和右边的动画库可以去掉了」——常驻入口不再是**通道**，而是干扰 | 删掉 `sidebar.panellist` 与 `conversation.session.header.utilities` 两个注册，**页面、图标、按钮全部保留且仍被测试**（恢复任一入口 = 在 `apply` 里加回一次 `register`）。测试从「断言注册了 3 个」改为「断言只注册 `main`」——把两个入口的**缺失**钉死，因为无意中把常驻按钮加回每个会话才是真正值得拦住的回归 |
+| 14 | 后续需求（改挂右侧栏） | 第 13 条把入口全删了，用户随即澄清真实意图：**入口只留右上角**，但点击后应当「只和侧边栏一样，只是在侧边展开，不要覆盖整个页面」。而原实现的 `layout.selectPanel(PANEL_ID)` 是**切主区面板**——它必然占满页面，方向就错了 | 改为注册一个**页面型右侧栏 tab**：`ctx.sidebarRightTabs.register({ id, kind, priority, title })`（页面型不带 `patterns`，按 kind 打开）+ body 注册在 `sidebar.right.pane.tab` 下、key = `definition.id`；按钮改调 `sidebarRight.openTab(kind)`——**它自己会展开右栏**（「content the user cannot see is not opened」），于是右栏在旁展开而非覆盖页面。据此删掉 `main` 注册与整页路径、删掉死掉的 `IconCell`、`inject` 由 `["slots","sidebarRight","layout"]` 改为 `["slots","sidebarRight","sidebarRightTabs"]`。两个**必须提前**的细节：① tab **type** 走 `ctx.effect` **先注册**，不能放在 body 的 inject 回调里——`openTab` 对未注册的 kind 会抛，而按钮可能早于右栏座位被点击；② **不贡献 `guide` 条目**——默认页由 guide 条目数决定（恰好 1 个直接开该页，0 个或多个开 guide 页），加一条会改变所有用户首次展开右栏看到的东西，属于本插件无权改动的产品行为。CSS 同步适配窄栏：搜索框去掉 220px 硬下限、网格改 `minmax(min(240px,100%),1fr)` |
 
-**执行结果**：53 个离线测试全绿（计划预期 42 + 4 = 46，多出的 7 条来自上表第 2/3/4/6 条的修正与加强），`lib/client.js` 零硬编码颜色、零写请求。
+**执行结果**：53 个离线测试全绿（计划预期 42 + 4 = 46，多出的 7 条来自上表第 2/3/4/6 条的修正与加强），`lib/client.js` 零硬编码颜色、零写请求。第 7–14 条为后续需求，离线测试最终 78 条全绿。
 
 
 

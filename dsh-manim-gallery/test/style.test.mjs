@@ -48,6 +48,11 @@ test("apply injects the stylesheet", () => {
 	};
 	loaded.plugin.apply({
 		slots: { inject: (key, cb) => cb(), register: () => () => {} },
+		// The tab type registers through `ctx.effect`; a bare no-op is enough here,
+		// because this test only asks whether the stylesheet reached the document.
+		effect: (cb) => cb(),
+		sidebarRight: {},
+		sidebarRightTabs: { register: () => () => {} },
 		get: () => undefined,
 		on: () => () => {},
 	});

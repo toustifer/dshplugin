@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { createCtx, loadClient, makeRun } from "./harness.mjs";
+import { createCtx, createTabRegistry, loadClient, makeRun } from "./harness.mjs";
 
 const { plugin } = loadClient();
 
+/** The declared services, mounted the way the harness mounts any dependency. */
+function services(overrides = {}) {
+	return { sidebarRight: {}, sidebarRightTabs: createTabRegistry(), ...overrides };
+}
+
 function pageOf(loaded) {
-	const { ctx, registrations } = createCtx();
+	const { ctx, registrations } = createCtx({ services: services() });
 	loaded.plugin.apply(ctx);
-	return registrations.find((r) => r.options.name === "main").component;
+	return registrations.find((r) => r.options.name === "sidebar.right.pane.tab").component;
 }
 
 /**
@@ -124,10 +129,14 @@ test("a reload clears a previous error before it resolves", async () => {
 	assert.equal(updates.at(-1).phase, "empty");
 });
 
-test("the sidebar icon cell forwards the geometry it was handed", () => {
-	const cell = plugin.__internals.IconCell({ size: 20, active: true });
-	assert.equal(cell.props.width, 20);
-	assert.match(cell.props.className, /is-active/);
+test("the header button draws the icon at chip size", () => {
+	// The left rail's `IconCell` is gone with the rail; the header button is the one
+	// consumer of `galleryIcon` left, and it asks for the 16px chip size.
+	const button = plugin.__internals.makeHeaderButton({ sidebarRight: { openTab() {} } });
+	const tree = button({});
+	const [glyph] = tree.props.children;
+	assert.equal(glyph.props.width, 16);
+	assert.match(glyph.props.className, /manim-gallery__glyph/);
 });
 
 test("copyToClipboard writes the given text", async () => {
@@ -151,20 +160,19 @@ test("copyToClipboard swallows a rejected write", async () => {
 	await plugin.__internals.copyToClipboard("x", clipboard);
 });
 
-const { openInRightbar, galleryActions, openGalleryPanel } = plugin.__internals;
+const { openInRightbar, galleryActions, openGalleryColumn } = plugin.__internals;
 
-test("openInRightbar expands the column before handing over the address", () => {
+test("openInRightbar hands over the address and lets openResource expand the column", () => {
 	const calls = [];
 	const services = {
+		// Still supplied, to prove it is NOT called: `openResource` expands the column
+		// on its own, and `layout` is no longer a declared dependency of this plugin.
 		layout: { openRightbar: (...args) => calls.push(["openRightbar", ...args]) },
 		sidebarRight: { openResource: (...args) => calls.push(["openResource", ...args]) },
 	};
 
 	assert.equal(openInRightbar("D:\\r\\a.gif", services), true);
-	assert.deepEqual(calls, [
-		["openRightbar", true, false],
-		["openResource", "dsh-resource://file/absolute/D:/r/a.gif"],
-	]);
+	assert.deepEqual(calls, [["openResource", "dsh-resource://file/absolute/D:/r/a.gif"]]);
 });
 
 test("openInRightbar reports whether it could act", () => {
@@ -228,19 +236,16 @@ test("apply reads the services off the declared context properties", () => {
 	// as a context property, and only when it is declared in `inject`. Probing with
 	// `ctx.get` returned undefined and cost the panel its right-sidebar button.
 	const { ctx, registrations, asked } = createCtx({
-		services: {
-			layout: { openRightbar() {}, selectPanel() {} },
-			sidebarRight: { openResource() {} },
-		},
+		services: services({ sidebarRight: { openResource() {}, openTab() {} } }),
 	});
 	plugin.apply(ctx);
 
 	assert.deepEqual(asked, [], "the services must come from the declared properties");
-	assert.equal(registrations.length, 1);
+	assert.equal(registrations.length, 2);
 
-	// And the page it built really does carry the action.
-	const main = registrations.find((r) => r.options.name === "main");
-	assert.equal(typeof main.component, "function");
+	// And the body it built really does carry the page.
+	const body = registrations.find((r) => r.options.name === "sidebar.right.pane.tab");
+	assert.equal(typeof body.component, "function");
 });
 
 test("galleryActions gains openInRightbar only when the service is mounted", () => {
@@ -254,55 +259,78 @@ test("galleryActions gains openInRightbar only when the service is mounted", () 
 	assert.equal(typeof withService.openInRightbar, "function");
 });
 
-test("apply registers one working component", () => {
-	// `sidebarRight` and `layout` are declared dependencies, so Cordis does not call
-	// `apply` at all until they exist — there is no "service missing" state left to
-	// degrade into.
-	const { ctx, registrations } = createCtx({
-		services: { layout: { selectPanel() {} }, sidebarRight: { openResource() {} } },
-	});
+test("apply registers the tab body and the header door", () => {
+	// `sidebarRight` and `sidebarRightTabs` are declared dependencies, so Cordis does
+	// not call `apply` at all until they exist — there is no "service missing" state
+	// left to degrade into.
+	const { ctx, registrations } = createCtx({ services: services() });
 	plugin.apply(ctx);
 
-	assert.equal(registrations.length, 1);
+	assert.deepEqual(
+		registrations.map((r) => r.options.name),
+		["sidebar.right.pane.tab", "conversation.session.header.utilities"]
+	);
 	for (const entry of registrations) {
 		assert.equal(typeof entry.component, "function", entry.options.name);
 	}
 });
 
-test("the header button opens the gallery panel when it is wired up", () => {
-	// The button is no longer registered (see `apply`), but it is kept built and
-	// tested so restoring the door is a one-line change. Exercise it through the
-	// internals rather than through a registration that no longer exists.
-	const selected = [];
+test("the header button opens the gallery as a right-column tab", () => {
+	// The whole point of this design: the door expands the side column instead of
+	// swapping the centre panel, so the conversation stays on screen.
+	const opened = [];
 	const button = plugin.__internals.makeHeaderButton({
-		layout: { selectPanel: (id) => selected.push(id) },
+		sidebarRight: { openTab: (kind, options) => opened.push([kind, options]) },
 	});
 	const tree = button({});
 	assert.equal(typeof tree.props.onClick, "function");
 	tree.props.onClick();
-	assert.deepEqual(selected, ["manim-gallery"]);
+	assert.deepEqual(opened, [["manim-gallery", undefined]]);
 });
 
-test("the header button reports a missing layout service instead of throwing", () => {
-	assert.equal(openGalleryPanel({}), false);
-	assert.equal(openGalleryPanel({ layout: {} }), false);
-	assert.equal(openGalleryPanel({ layout: { selectPanel() {} } }), true);
+test("the header button reports a missing controller instead of throwing", () => {
+	const open = plugin.__internals.openGalleryColumn;
+	assert.equal(open({}), false);
+	assert.equal(open({ sidebarRight: {} }), false);
+	assert.equal(open({ sidebarRight: { openTab() {} } }), true);
+});
+
+test("the header button survives a controller that throws before its seat mounts", () => {
+	// `openTab` throws "no session surface is mounted" until the column's seat binds,
+	// and this button can be pressed that early. A throw escaping a React event
+	// handler would take the whole header down.
+	const warn = console.warn;
+	const warnings = [];
+	console.warn = (...args) => warnings.push(args);
+	try {
+		const opened = plugin.__internals.openGalleryColumn({
+			sidebarRight: {
+				openTab() {
+					throw new Error("no session surface is mounted");
+				},
+			},
+		});
+		assert.equal(opened, false);
+	} finally {
+		console.warn = warn;
+	}
+	// Not silent: the condition is logged, not swallowed.
+	assert.equal(warnings.length, 1);
 });
 
 test("the actions built for the page reach the resolved service", () => {
 	const opened = [];
 	const { ctx, registrations } = createCtx({
-		services: {
-			layout: { openRightbar() {} },
+		services: services({
 			sidebarRight: { openResource: (address) => opened.push(address) },
-		},
+		}),
 	});
 	plugin.apply(ctx);
 
 	// The page renders `loading` first, so reach the actions the way the panel does
 	// and then exercise the one that touches the services.
-	const main = registrations.find((r) => r.options.name === "main");
-	assert.equal(typeof main.component, "function");
+	const body = registrations.find((r) => r.options.name === "sidebar.right.pane.tab");
+	assert.equal(typeof body.component, "function");
 	const actions = galleryActions({
 		setState: () => {},
 		services: { sidebarRight: { openResource: (address) => opened.push(address) } },

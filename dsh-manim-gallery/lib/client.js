@@ -8,8 +8,20 @@ window.__ModuleLoader__.load({
 		const react = require("react");
 		const h = react.createElement;
 
-		/** The panel id. The sidebar entry and the `main` key must be this one string. */
-		const PANEL_ID = "manim-gallery";
+		/**
+		 * This implementation's identity in the right column's tab system. It is both
+		 * the `id` of the registered tab type and the `key` its body registers under —
+		 * the two must be one string, because the seat dispatches the body by the id of
+		 * the type in force.
+		 */
+		const GALLERY_ID = "dsh-manim-gallery";
+
+		/**
+		 * The tab kind this plugin owns. A page type is opened by kind (there is no
+		 * resource address for it to match), so this literal is the argument the header
+		 * button hands to `sidebarRight.openTab`.
+		 */
+		const GALLERY_KIND = "manim-gallery";
 
 		const STYLE_ID = "@dsh-manim-gallery/panel.css";
 
@@ -19,18 +31,24 @@ window.__ModuleLoader__.load({
 		 * `--dsw-*` vocabulary exists to prevent.
 		 */
 		const GALLERY_CSS = `
-.manim-gallery { display: flex; flex-direction: column; gap: 16px; padding: 20px 24px; height: 100%; overflow: auto; color: var(--dsw-alias-label-primary); }
+.manim-gallery { display: flex; flex-direction: column; gap: 16px; padding: 16px 18px; height: 100%; overflow: auto; color: var(--dsw-alias-label-primary); }
 .manim-gallery__glyph { display: block; }
 .manim-gallery__glyph.is-active { color: var(--dsw-alias-label-primary); }
 .manim-gallery__header { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; background: none; border: none; border-radius: 6px; color: var(--dsw-alias-label-secondary); cursor: pointer; }
 .manim-gallery__header:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .manim-gallery__toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .manim-gallery__search, .manim-gallery__select { background: var(--dsw-alias-bg-base); color: inherit; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 6px 10px; font: inherit; }
-.manim-gallery__search { min-width: 220px; }
+/* min-width:0 plus a flex basis instead of a hard 220px floor: the right column is
+   roughly half the width the full page used to give this toolbar, and a min-width here
+   would push the toolbar wider than its column and scroll the whole panel sideways. */
+.manim-gallery__search { flex: 1 1 140px; min-width: 0; }
 .manim-gallery__button { background: var(--dsw-alias-interactive-bg-hover); color: inherit; border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
 .manim-gallery__button:hover { background: var(--dsw-alias-interactive-bg-active); }
 .manim-gallery__toggle { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
-.manim-gallery__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+/* min(240px, 100%) is the standard guard: a bare minmax(240px, 1fr) refuses to
+   shrink below 240px, so in a column narrower than that the track overflows instead of
+   collapsing to one column. */
+.manim-gallery__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 16px; }
 .manim-gallery__card { display: flex; flex-direction: column; gap: 8px; padding: 10px; text-align: left; background: var(--dsw-alias-bg-base); color: inherit; border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; cursor: pointer; font: inherit; }
 .manim-gallery__card:hover { border-color: var(--dsw-alias-label-primary); }
 .manim-gallery__thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: var(--dsw-alias-bg-base); border-radius: 6px; }
@@ -132,20 +150,17 @@ window.__ModuleLoader__.load({
 		 *    has mounted and bound the current session. Expanding the column and
 		 *    calling it in the same tick therefore throws, and the click looks dead —
 		 *    so the call is retried until the binding exists.
-		 * 2. Whether `openResource` also reveals the column is not part of its
-		 *    contract, so the column is expanded explicitly first.
+		 * 2. `openResource` expands the column itself — "content the user cannot see is
+		 *    not opened" is part of the contract — so no separate `layout.openRightbar`
+		 *    call is needed. `layout` is no longer a declared dependency at all.
 		 *
 		 * Giving up silently is not allowed: the button would stay there looking
 		 * alive, so the last failure is reported.
 		 */
 		function openInRightbar(absolutePath, services = {}, options = {}) {
-			const { sidebarRight, layout } = services;
+			const { sidebarRight } = services;
 			if (sidebarRight === undefined || typeof sidebarRight.openResource !== "function") {
 				return false;
-			}
-
-			if (layout !== undefined && typeof layout.openRightbar === "function") {
-				layout.openRightbar(true, false);
 			}
 
 			const address = resourceAddress(absolutePath);
@@ -508,11 +523,6 @@ window.__ModuleLoader__.load({
 			return clipboard.writeText(String(text)).catch(() => {});
 		}
 
-		/** The sidebar icon cell: the only props the owner passes are its geometry. */
-		function IconCell({ size, active }) {
-			return galleryIcon({ size, active });
-		}
-
 		/**
 		 * The load state machine, independent of React.
 		 *
@@ -617,19 +627,46 @@ window.__ModuleLoader__.load({
 						type: "button",
 						title: "动画库",
 						"aria-label": "动画库",
-						onClick: () => openGalleryPanel(services),
+						onClick: () => openGalleryColumn(services),
 					},
 					galleryIcon({ size: 16, active: false })
 				);
 			};
 		}
 
-		/** Reveal the gallery panel in the main column. */
-		function openGalleryPanel(services = {}) {
-			const { layout } = services;
-			if (layout === undefined || typeof layout.selectPanel !== "function") return false;
-			layout.selectPanel(PANEL_ID);
-			return true;
+		/**
+		 * Open the gallery as a tab of the right column.
+		 *
+		 * `openTab` is the navigation controller for page types, and it is the whole
+		 * implementation: the column expands on its own, because "content the user
+		 * cannot see is not opened". That is what makes this expand the side column
+		 * *beside* the conversation instead of replacing it — the earlier
+		 * `layout.selectPanel` path swapped the centre panel and covered the page,
+		 * which is the behaviour that was rejected.
+		 *
+		 * A second click focuses the existing tab rather than stacking duplicates
+		 * (`openTab` deduplicates page tabs within the target pane).
+		 *
+		 * Returns false instead of throwing when the controller is not mounted. It
+		 * throws with "no session surface is mounted" before the column's seat binds,
+		 * and this button can be pressed that early.
+		 */
+		function openGalleryColumn(services = {}) {
+			const { sidebarRight } = services;
+			if (sidebarRight === undefined || typeof sidebarRight.openTab !== "function") {
+				return false;
+			}
+			try {
+				sidebarRight.openTab(GALLERY_KIND);
+				return true;
+			} catch (error) {
+				// Not silent: an unmounted surface is a real condition worth seeing, and
+				// the caller still gets a usable `false`.
+				if (globalThis.console !== undefined) {
+					globalThis.console.warn("[manim-gallery] openTab failed:", error);
+				}
+				return false;
+			}
 		}
 
 		/**
@@ -638,51 +675,107 @@ window.__ModuleLoader__.load({
 		 * cannot see, "what did the plugin actually get?" has to be measurable rather
 		 * than guessed at.
 		 *
-		 * `__DSH_MANIM_GALLERY__.services()` answers whether the two declared
-		 * dependencies arrived; `.show()` and `.open(path)` drive the two doors.
+		 * `__DSH_MANIM_GALLERY__.services()` answers whether the declared dependencies
+		 * arrived; `.show()` and `.open(path)` drive the two doors.
 		 */
 		function publishProbe(services) {
 			globalThis.__DSH_MANIM_GALLERY__ = {
-				panelId: PANEL_ID,
+				tabId: GALLERY_ID,
+				kind: GALLERY_KIND,
 				renderRoot: RENDER_ROOT,
 				services: () => ({
-					layout: services.layout !== undefined,
 					sidebarRight: services.sidebarRight !== undefined,
+					sidebarRightTabs: services.sidebarRightTabs !== undefined,
 				}),
-				show: () => openGalleryPanel(services),
+				show: () => openGalleryColumn(services),
 				open: (absolutePath) => openInRightbar(absolutePath, services),
 				resourceAddress,
 			};
 		}
 
+		/**
+		 * The gallery tab type's registry definition.
+		 *
+		 * A **page** type: it recognizes no resource address, so it names no `patterns`
+		 * and is opened by kind. `priority` is the band a resource claim would rank by
+		 * and carries no meaning for a page type; `extension` is the honest label for a
+		 * type contributed from outside the product.
+		 *
+		 * **`guide` is deliberately absent.** The default page is chosen by how many
+		 * guide entries are registered — exactly one opens it directly (Files, in the
+		 * shipped composition), zero or more than one opens the guide page instead.
+		 * Contributing an entry here would therefore change what every user sees when
+		 * they first expand the column: a visible product behaviour changed by a plugin
+		 * that has nothing to do with it. Omitting it keeps that count at one.
+		 */
+		function galleryTabDefinition() {
+			return {
+				id: GALLERY_ID,
+				kind: GALLERY_KIND,
+				priority: "extension",
+				title: () => "动画库",
+			};
+		}
+
 		function apply(ctx) {
 			ensureStyle();
-			const services = { layout: ctx.layout, sidebarRight: ctx.sidebarRight };
+			const services = {
+				sidebarRight: ctx.sidebarRight,
+				sidebarRightTabs: ctx.sidebarRightTabs,
+			};
 			publishProbe(services);
 
-			// The two visible doors are deliberately NOT registered any more:
-			// `sidebar.panellist` (the left rail's icon) and
-			// `conversation.session.header.utilities` (the Session header's
-			// right-aligned button). The animation now reaches the reader embedded in
-			// the answer body itself — see `envelope.preview_markdown` in the engine —
-			// so a permanently visible gallery entry is clutter rather than access.
-			//
-			// `main` stays registered and the page, the icon, and the header button all
-			// still exist and are tested, so restoring either door is one
-			// `ctx.slots.register(...)` call and nothing else.
-			ctx.slots.inject("main", () =>
-				ctx.slots.register({ name: "main", key: PANEL_ID }, makeGalleryPage(services))
+			// The type registers EAGERLY, not from inside the body's `inject` callback.
+			// `openTab` throws when a kind has no registration, and the header button can
+			// be pressed before the right column's seat has mounted the body slot — so the
+			// thing that makes the open legal must not wait for the thing that draws it.
+			// `ctx.effect` ties the registration (it returns a disposer) to this plugin's
+			// lifetime, which is what the shipped `dsh-client-ui-sidebar-files` does too.
+			ctx.effect(
+				() => services.sidebarRightTabs.register(galleryTabDefinition()),
+				"manim-gallery: tab type"
+			);
+
+			// The body, under the type's own id.
+			ctx.slots.inject("sidebar.right.pane.tab", () =>
+				ctx.slots.register(
+					{ name: "sidebar.right.pane.tab", key: GALLERY_ID },
+					makeGalleryPage(services)
+				)
+			);
+
+			// The one door: the Session header's right-aligned utilities, which the user
+			// asked to keep. `sidebar.panellist` (the left rail) is deliberately NOT
+			// registered. No `title` registration either — an absent one falls back to the
+			// text captured from the type definition's `title`.
+			ctx.slots.inject("conversation.session.header.utilities", () =>
+				ctx.slots.register(
+					{
+						name: "conversation.session.header.utilities",
+						id: GALLERY_ID,
+						order: 10,
+						label: "动画库",
+					},
+					makeHeaderButton(services)
+				)
 			);
 		}
 
 		exports.apply = apply;
-		// `sidebarRight` and `layout` are DECLARED and then read as `ctx.sidebarRight` /
-		// `ctx.layout`. Reaching a sibling plugin's service with `ctx.get` crosses a
-		// scope boundary and yields undefined, which silently cost this plugin its
-		// right-sidebar button; declaring them is what the shipped plugins do too.
-		exports.inject = ["slots", "sidebarRight", "layout"];
+		// Declared dependencies, then read as `ctx.sidebarRight` / `ctx.sidebarRightTabs`.
+		// Reaching a sibling plugin's service with `ctx.get` crosses a scope boundary and
+		// yields undefined, which silently cost this plugin its right-sidebar button;
+		// declaring them is what the shipped plugins do too — `dsh-client-ui-sidebar-files`
+		// injects `slots`, `locale`, `sidebarRightTabs`, `remote`, `remote.workspaceFiles`
+		// and then reads `ctx.sidebarRightTabs`.
+		//
+		// `layout` is no longer declared: the full-page path was removed, and `openTab`
+		// is what expands the column. Declaring an unused service would keep this plugin
+		// waiting on something it never reads.
+		exports.inject = ["slots", "sidebarRight", "sidebarRightTabs"];
 		exports.__internals = {
-			PANEL_ID,
+			GALLERY_ID,
+			GALLERY_KIND,
 			RENDER_ROOT,
 			INDEX_PATH,
 			TOOL_LABELS,
@@ -701,10 +794,10 @@ window.__ModuleLoader__.load({
 			galleryIcon,
 			galleryView,
 			copyToClipboard,
-			IconCell,
 			makeGalleryPage,
 			makeHeaderButton,
-			openGalleryPanel,
+			galleryTabDefinition,
+			openGalleryColumn,
 			galleryActions,
 			resourceAddress,
 			previewablePath,

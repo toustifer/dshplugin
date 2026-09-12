@@ -57,6 +57,8 @@ export function createReactStub() {
 export function createCtx({ services = {}, onGet } = {}) {
 	const registrations = [];
 	const asked = [];
+	const effects = [];
+	const tabTypes = [];
 	const ctx = {
 		slots: {
 			inject(key, callback) {
@@ -66,6 +68,15 @@ export function createCtx({ services = {}, onGet } = {}) {
 				registrations.push({ options, component });
 				return () => {};
 			},
+		},
+		/**
+		 * Cordis's fiber-scoped side-effect hook. The plugin registers its tab TYPE
+		 * through this rather than through a slot, so the registry has to be observable
+		 * here for a test to prove the type exists before any slot does.
+		 */
+		effect(callback, label) {
+			effects.push({ label });
+			return callback();
 		},
 		/** A probe escape hatch; the sanctioned access is the property form below. */
 		get(name) {
@@ -84,10 +95,31 @@ export function createCtx({ services = {}, onGet } = {}) {
 	return {
 		registrations,
 		asked,
+		effects,
 		ctx,
 		/** The registration for one slot, matched by list `id` or keyed `key`. */
 		find(name) {
 			return registrations.find((entry) => entry.options.name === name);
+		},
+	};
+}
+
+/**
+ * The `sidebarRightTabs` registry, recorded instead of applied.
+ *
+ * `register` returns a disposer, exactly as the shipped registry does, so a test can
+ * assert both that a type was declared and that tearing it down is possible.
+ */
+export function createTabRegistry() {
+	const types = [];
+	return {
+		types,
+		register(definition) {
+			types.push(definition);
+			return () => {
+				const at = types.indexOf(definition);
+				if (at >= 0) types.splice(at, 1);
+			};
 		},
 	};
 }
@@ -142,7 +174,9 @@ export function makeRun(overrides = {}) {
 			previewKind: "gif",
 			poster: "D:\\myprogram\\dshplugin\\renders\\20260912-153012-a1b2\\out\\EquationScene.png",
 		},
-		previewUrlPath: "/D:/myprogram/dshplugin/renders/20260912-153012-a1b2/out/EquationScene.gif",
+		// The form the engine emits: the absolute path with the drive letter removed.
+		// (`/D:/...` is NOT it — `node:path.resolve` turns that into `D:\D:\...`.)
+		previewUrlPath: "/myprogram/dshplugin/renders/20260912-153012-a1b2/out/EquationScene.gif",
 		args: { steps: 3 },
 		warnings: [],
 		...overrides,
