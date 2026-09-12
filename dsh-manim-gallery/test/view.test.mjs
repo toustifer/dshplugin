@@ -171,6 +171,59 @@ test("the view never builds a write request", () => {
 	}
 });
 
+test("the detail view offers opening the animation in the right sidebar", () => {
+	const run = makeRun();
+	const acts = actions();
+	const opened = [];
+	acts.openInRightbar = (path) => opened.push(path);
+	const tree = galleryView({ phase: "ready", runs: [run], selected: run.runId }, acts);
+
+	const open = byClass(tree, "manim-gallery__rightbar");
+	assert.ok(open, "no right-sidebar button was rendered");
+	open.props.onClick();
+	assert.deepEqual(opened, [run.assets.preview]);
+});
+
+test("the right-sidebar button targets a previewable artifact, never the MP4", () => {
+	// The shipped document preview lists gif/webp/png; it does not list video/mp4.
+	// Handing it the MP4 would open a tab that cannot render anything.
+	const run = makeRun();
+	const acts = actions();
+	const opened = [];
+	acts.openInRightbar = (path) => opened.push(path);
+	const tree = galleryView({ phase: "ready", runs: [run], selected: run.runId }, acts);
+	byClass(tree, "manim-gallery__rightbar").props.onClick();
+
+	assert.equal(opened.length, 1);
+	assert.ok(opened[0].endsWith(".gif"), opened[0]);
+});
+
+test("the right-sidebar button falls back to the poster when there is no preview", () => {
+	const run = makeRun({ assets: { poster: "D:\\r\\a.png" } });
+	const acts = actions();
+	const opened = [];
+	acts.openInRightbar = (path) => opened.push(path);
+	const tree = galleryView({ phase: "ready", runs: [run], selected: run.runId }, acts);
+	byClass(tree, "manim-gallery__rightbar").props.onClick();
+	assert.deepEqual(opened, ["D:\\r\\a.png"]);
+});
+
+test("the detail view omits the right-sidebar button when the service is absent", () => {
+	// `sidebarRight` ships with DSH, but a plugin must degrade rather than render a
+	// button that cannot work.
+	const run = makeRun();
+	const tree = galleryView({ phase: "ready", runs: [run], selected: run.runId }, actions());
+	assert.equal(byClass(tree, "manim-gallery__rightbar"), undefined);
+});
+
+test("a run with nothing previewable gets no right-sidebar button", () => {
+	const run = makeRun({ assets: { mp4: "D:\\r\\a.mp4" } });
+	const acts = actions();
+	acts.openInRightbar = () => {};
+	const tree = galleryView({ phase: "ready", runs: [run], selected: run.runId }, acts);
+	assert.equal(byClass(tree, "manim-gallery__rightbar"), undefined);
+});
+
 function actions() {
 	const acts = {
 		selected: [],
@@ -178,6 +231,7 @@ function actions() {
 		select: (runId) => acts.selected.push(runId),
 		back: () => {},
 		copyPath: () => {},
+		openInRightbar: undefined,
 		setQuery: () => {},
 		setTool: () => {},
 		setSort: () => {},

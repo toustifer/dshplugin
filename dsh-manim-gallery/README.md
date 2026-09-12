@@ -72,6 +72,12 @@ const RENDER_ROOT = "D:/myprogram/dshplugin/renders";
 
 因此这两件事改由 **MCP 侧的 `runs` 工具**承担：用户对模型说「把那张图删了」，模型调用 `runs action=delete`。面板只提供「复制路径」，让用户在资源管理器里自行处理。
 
+**「在右侧打开」不属于写操作，所以它在范围内**：面板把一个 `dsh-resource://file/absolute/...` 资源地址交给 DSH 自带的右侧栏文档预览器（`ctx.sidebarRight.openResource`），由那个预览器渲染 GIF/WebP/PNG——不需要我们自己写预览器，也不需要新造 tab 类型。
+
+- **只交预览产物，不交 MP4**：自带预览器的 MIME 表里有 `gif`/`webp`/`png`，**没有 `video/mp4`**，交 MP4 会开出一个渲染不出内容的 tab。完整视频仍走面板内的 `<video controls>`。
+- 先调 `ctx.layout.openRightbar(true, false)` 展开抽屉：`openResource` 是否顺带展开不属于它的契约，显式调用才不会开出一个看不见的 tab。
+- 两个服务用 `ctx.get()` **探测**，不写进 `inject`：缺服务时只是少一个按钮，面板照常可用。
+
 代码里也钉了一道：`test/view.test.mjs` 的 `the view never builds a write request` 遍历整棵元素树，断言没有任何 `method:` / POST / DELETE / PUT 字符串。
 
 ---

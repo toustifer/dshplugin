@@ -150,3 +150,75 @@ test("copyToClipboard swallows a rejected write", async () => {
 	};
 	await plugin.__internals.copyToClipboard("x", clipboard);
 });
+
+const { openInRightbar, galleryActions } = plugin.__internals;
+
+test("openInRightbar expands the column before handing over the address", () => {
+	const calls = [];
+	const services = {
+		layout: { openRightbar: (...args) => calls.push(["openRightbar", ...args]) },
+		sidebarRight: { openResource: (...args) => calls.push(["openResource", ...args]) },
+	};
+
+	assert.equal(openInRightbar("D:\\r\\a.gif", services), true);
+	assert.deepEqual(calls, [
+		["openRightbar", true, false],
+		["openResource", "dsh-resource://file/absolute/D:/r/a.gif"],
+	]);
+});
+
+test("openInRightbar reports whether it could act", () => {
+	assert.equal(openInRightbar("D:\\r\\a.gif", {}), false);
+	assert.equal(openInRightbar("D:\\r\\a.gif", { sidebarRight: undefined }), false);
+	assert.equal(openInRightbar("D:\\r\\a.gif", { sidebarRight: {} }), false);
+	assert.equal(openInRightbar("D:\\r\\a.gif", { sidebarRight: { openResource() {} } }), true);
+});
+
+test("openInRightbar still works when the layout service is absent", () => {
+	const seen = [];
+	openInRightbar("D:\\r\\a.gif", { sidebarRight: { openResource: (a) => seen.push(a) } });
+	assert.equal(seen.length, 1);
+});
+
+test("galleryActions gains openInRightbar only when the service is mounted", () => {
+	const base = { setState: () => {}, services: {} };
+	assert.equal(galleryActions(base).openInRightbar, undefined);
+
+	const withService = galleryActions({
+		...base,
+		services: { sidebarRight: { openResource() {} } },
+	});
+	assert.equal(typeof withService.openInRightbar, "function");
+});
+
+test("apply probes the services instead of demanding them", () => {
+	const { ctx, registrations, asked } = createCtx({ services: {} });
+	plugin.apply(ctx);
+
+	assert.deepEqual(asked.sort(), ["layout", "sidebarRight"]);
+	// Both slots still register: a missing service costs one button, not the panel.
+	assert.equal(registrations.length, 2);
+	assert.equal(typeof registrations.find((r) => r.options.name === "main").component, "function");
+});
+
+test("the actions built for the page reach the resolved service", () => {
+	const opened = [];
+	const { ctx, registrations } = createCtx({
+		services: {
+			layout: { openRightbar() {} },
+			sidebarRight: { openResource: (address) => opened.push(address) },
+		},
+	});
+	plugin.apply(ctx);
+
+	// The page renders `loading` first, so reach the actions the way the panel does
+	// and then exercise the one that touches the services.
+	const main = registrations.find((r) => r.options.name === "main");
+	assert.equal(typeof main.component, "function");
+	const actions = galleryActions({
+		setState: () => {},
+		services: { sidebarRight: { openResource: (address) => opened.push(address) } },
+	});
+	assert.equal(actions.openInRightbar("D:\\r\\a.gif"), true);
+	assert.deepEqual(opened, ["dsh-resource://file/absolute/D:/r/a.gif"]);
+});

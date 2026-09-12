@@ -86,6 +86,58 @@ window.__ModuleLoader__.load({
 			return fileUrl(INDEX_PATH);
 		}
 
+		/**
+		 * Address one absolute path as a DSH file resource.
+		 *
+		 * Mirrors `dsh-util-workspace-path`'s `absoluteFileAddress`: normalize the
+		 * separators, drop a leading slash, then percent-encode each segment while
+		 * keeping the drive colon literal. The shipped document preview registers a
+		 * `dsh-resource://file/**` implementation, so this address is what lets the
+		 * right sidebar open a GIF with its own viewer instead of us writing one.
+		 */
+		function resourceAddress(absolutePath) {
+			const normalized = String(absolutePath).replace(/\\/g, "/");
+			const absolute = normalized.replace(/^\/+/, "");
+			const encoded = absolute
+				.split("/")
+				.map((segment) => encodeURIComponent(segment).replace(/%3A/gi, ":"))
+				.join("/");
+			return `dsh-resource://file/absolute/${encoded}`;
+		}
+
+		/**
+		 * The artifact the right sidebar can actually render.
+		 *
+		 * Its preview lists gif/webp/png and does not list video/mp4, so the MP4 is
+		 * deliberately never handed over — that would open a tab showing nothing.
+		 */
+		function previewablePath(run) {
+			const preview = run?.assets?.preview;
+			if (typeof preview === "string" && preview) return preview;
+			const poster = run?.assets?.poster;
+			if (typeof poster === "string" && poster) return poster;
+			return null;
+		}
+
+		/**
+		 * Open one artifact in the right sidebar.
+		 *
+		 * The sidebar is expanded first: `openResource` adds a tab, and whether it
+		 * also reveals the column is not part of its contract, so asking explicitly
+		 * avoids a tab that exists out of sight.
+		 */
+		function openInRightbar(absolutePath, services = {}) {
+			const { sidebarRight, layout } = services;
+			if (sidebarRight === undefined || typeof sidebarRight.openResource !== "function") {
+				return false;
+			}
+			if (layout !== undefined && typeof layout.openRightbar === "function") {
+				layout.openRightbar(true, false);
+			}
+			sidebarRight.openResource(resourceAddress(absolutePath));
+			return true;
+		}
+
 		const MINUTE = 60_000;
 		const HOUR = 60 * MINUTE;
 		const DAY = 24 * HOUR;
@@ -285,6 +337,12 @@ window.__ModuleLoader__.load({
 			const preview = runPreviewUrl(run);
 			const poster = run?.assets?.poster;
 			const copyTarget = mp4 ?? run?.assets?.preview ?? "";
+			const previewable = previewablePath(run);
+			// Offered only when the panel can actually do it: no `sidebarRight` service,
+			// or nothing the shipped preview can render, means no button rather than a
+			// button that does nothing.
+			const canOpenInRightbar =
+				typeof actions.openInRightbar === "function" && previewable !== null;
 			return h(
 				"div",
 				{ className: "manim-gallery__detail", key: "detail" },
@@ -297,6 +355,17 @@ window.__ModuleLoader__.load({
 						"← 返回"
 					),
 					h("h2", { className: "manim-gallery__detailTitle" }, runTitle(run)),
+					canOpenInRightbar
+						? h(
+								"button",
+								{
+									className: "manim-gallery__button manim-gallery__rightbar",
+									type: "button",
+									onClick: () => actions.openInRightbar(previewable),
+								},
+								"在右侧打开"
+							)
+						: null,
 					h(
 						"button",
 						{
@@ -434,42 +503,28 @@ window.__ModuleLoader__.load({
 			}
 		}
 
+		const INITIAL_STATE = {
+			phase: "loading",
+			runs: [],
+			selected: null,
+			error: null,
+			query: "",
+			tool: "",
+			sort: "newest",
+			includeFailed: false,
+		};
+
 		/**
-		 * The panel: hook wiring around `galleryView`, nothing else.
+		 * Every action the view can dispatch, as a function of the state setter and
+		 * the resolved Client services.
 		 *
-		 * Every decision the panel makes lives in `galleryView`; this function only
-		 * moves state in and out of React, which is why it is the shortest part of
-		 * the file.
+		 * Built as a plain factory rather than inline so "the right-sidebar action
+		 * exists only when the service does" is an assertable fact instead of a
+		 * property of a rendered tree nobody can reach in a test.
 		 */
-		function GalleryPage() {
-			const [state, setState] = react.useState({
-				phase: "loading",
-				runs: [],
-				selected: null,
-				error: null,
-				query: "",
-				tool: "",
-				sort: "newest",
-				includeFailed: false,
-			});
-
-			const load = react.useCallback(() => loadInto(setState), []);
-
-			react.useEffect(() => {
-				load();
-			}, [load]);
-
-			const visible = sortRuns(
-				filterRuns(state.runs, {
-					query: state.query,
-					tool: state.tool,
-					includeFailed: state.includeFailed,
-				}),
-				state.sort
-			);
-
+		function galleryActions({ setState, services = {} }) {
 			const actions = {
-				refresh: load,
+				refresh: () => loadInto(setState),
 				select: (runId) => setState((prev) => ({ ...prev, selected: runId })),
 				back: () => setState((prev) => ({ ...prev, selected: null })),
 				copyPath: (path) => copyToClipboard(path),
@@ -478,12 +533,48 @@ window.__ModuleLoader__.load({
 				setSort: (sort) => setState((prev) => ({ ...prev, sort })),
 				setIncludeFailed: (includeFailed) => setState((prev) => ({ ...prev, includeFailed })),
 			};
+			if (services.sidebarRight !== undefined) {
+				actions.openInRightbar = (path) => openInRightbar(path, services);
+			}
+			return actions;
+		}
 
-			return galleryView({ ...state, runs: visible }, actions);
+		/**
+		 * The panel component, bound to the services resolved when the plugin applied.
+		 *
+		 * React wiring only: state in, `galleryView` out. Every decision it could get
+		 * wrong lives in a pure function next to it.
+		 */
+		function makeGalleryPage(services) {
+			return function GalleryPage() {
+				const [state, setState] = react.useState(INITIAL_STATE);
+
+				react.useEffect(() => {
+					loadInto(setState);
+				}, []);
+
+				const actions = galleryActions({ setState, services });
+				const visible = sortRuns(
+					filterRuns(state.runs, {
+						query: state.query,
+						tool: state.tool,
+						includeFailed: state.includeFailed,
+					}),
+					state.sort
+				);
+
+				return galleryView({ ...state, runs: visible }, actions);
+			};
 		}
 
 		function apply(ctx) {
 			ensureStyle();
+			// Probed, not demanded: `sidebarRight` ships with DSH, but a missing service
+			// must cost the panel one button, not the whole panel.
+			const services = {
+				layout: ctx.get("layout"),
+				sidebarRight: ctx.get("sidebarRight"),
+			};
 			ctx.slots.inject("sidebar.panellist", () =>
 				ctx.slots.register(
 					{ name: "sidebar.panellist", id: PANEL_ID, order: 40, label: "动画库" },
@@ -491,7 +582,7 @@ window.__ModuleLoader__.load({
 				)
 			);
 			ctx.slots.inject("main", () =>
-				ctx.slots.register({ name: "main", key: PANEL_ID }, GalleryPage)
+				ctx.slots.register({ name: "main", key: PANEL_ID }, makeGalleryPage(services))
 			);
 		}
 
@@ -518,7 +609,11 @@ window.__ModuleLoader__.load({
 			galleryView,
 			copyToClipboard,
 			IconCell,
-			GalleryPage,
+			makeGalleryPage,
+			galleryActions,
+			resourceAddress,
+			previewablePath,
+			openInRightbar,
 			loadInto,
 		};
 		return module.exports;

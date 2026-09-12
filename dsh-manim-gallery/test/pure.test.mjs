@@ -15,6 +15,7 @@ const {
 	filterRuns,
 	loadIndex,
 	runTool,
+	resourceAddress,
 } = plugin.__internals;
 
 test("the render root is a slash path the Host can serve", () => {
@@ -158,4 +159,30 @@ test("loadIndex rejects a body that is not an object with runs", async () => {
 test("loadIndex tolerates a missing updatedAt", async () => {
 	const result = await loadIndex(async () => ({ ok: true, status: 200, json: async () => ({ runs: [] }) }));
 	assert.equal(result.updatedAt, null);
+});
+
+test("resourceAddress mirrors the Host's absoluteFileAddress", () => {
+	// `dsh-util-workspace-path` builds `dsh-resource://file/absolute/<encoded>`
+	// with `encodeURIComponent` per segment but the drive colon kept literal. The
+	// shipped document preview matches `dsh-resource://file/**`, which is what makes
+	// a GIF openable in the right sidebar.
+	assert.equal(
+		resourceAddress("D:\\myprogram\\dshplugin\\renders\\r1\\out\\S.gif"),
+		"dsh-resource://file/absolute/D:/myprogram/dshplugin/renders/r1/out/S.gif"
+	);
+});
+
+test("resourceAddress keeps the drive colon but encodes spaces", () => {
+	assert.equal(resourceAddress("D:\\a b\\c.gif"), "dsh-resource://file/absolute/D:/a%20b/c.gif");
+});
+
+test("resourceAddress drops a leading slash rather than doubling it", () => {
+	assert.equal(resourceAddress("/D:/a.gif"), "dsh-resource://file/absolute/D:/a.gif");
+});
+
+test("resourceAddress encodes characters that would break an address segment", () => {
+	const address = resourceAddress("D:\\a&b\\c#d.gif");
+	assert.ok(!address.includes("a&b"));
+	assert.ok(!address.includes("c#d"));
+	assert.ok(address.startsWith("dsh-resource://file/absolute/D:/"));
 });

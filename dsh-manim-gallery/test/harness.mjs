@@ -54,10 +54,12 @@ export function createReactStub() {
 	};
 }
 
-export function createCtx() {
+export function createCtx({ services = {}, onGet } = {}) {
 	const registrations = [];
+	const asked = [];
 	return {
 		registrations,
+		asked,
 		/** The registration for one slot, matched by list `id` or keyed `key`. */
 		find(name) {
 			return registrations.find((entry) => entry.options.name === name);
@@ -72,8 +74,15 @@ export function createCtx() {
 					return () => {};
 				},
 			},
-			get() {
-				return undefined;
+			/**
+			 * The plugin resolves optional Client services through `ctx.get`, so the
+			 * harness answers with whatever the test mounted — and records what was
+			 * asked for, which is how "it probes instead of demanding" is asserted.
+			 */
+			get(name) {
+				asked.push(name);
+				if (onGet !== undefined) onGet(name);
+				return services[name];
 			},
 			on() {
 				return () => {};
