@@ -75,6 +75,19 @@ async function probe(sendCookie, reference, label) {
   console.log(
     `${String(response.status).padEnd(7)} ${label.padEnd(46)} ${type} ${length}B`,
   );
+  // The security headers decide what can be done with the bytes: a `sandbox` CSP is
+  // what puts "render this in an <iframe>" in question, and `nosniff` is why a wrong
+  // content-type cannot be recovered from. Printing them here is what turns "the
+  // viewer will not open it" into a readable cause.
+  for (const name of [
+    "content-security-policy",
+    "content-disposition",
+    "cache-control",
+    "x-content-type-options",
+  ]) {
+    const value = response.headers.get(name);
+    if (value) console.log(`        ${name}: ${value}`);
+  }
 }
 
 const artifact = process.argv[2] ? resolve(process.argv[2]) : newestArtifact();

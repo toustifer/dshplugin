@@ -48,6 +48,10 @@ Manim 那条线只解决了图片：动画的 GIF 能内嵌进回答正文，因
 | `/api/file` 支持 audio/video 响应，且**不限制 MIME** | `dsh-api-session-controller` README 原文 |
 | `/api/file` 对**所有**文件套用同一个体积上限 | 同上：*"All files use `ctx.attachments.imageLimits.maxImageBytes` (normally 20 MiB); exceeding this limit returns 413"* |
 | 同源引用形式 = **去掉盘符的绝对路径**，且 `fs` 的 cwd 必须与产物同盘 | 见 2026-09-12 规格第 12 节通道 B；已用真实 cookie 对运行中的 Host 实测 200 |
+| `/api/file` 的响应带**最严格的 sandbox CSP** | 实测响应头 `content-security-policy: sandbox; default-src 'none'`（见 §9.1） |
+| `pdftoppm` / `pdftocairo` 随 MiKTeX 自带，**不需要新依赖** | `Get-Command pdftoppm` → `…\MiKTeX\miktex\bin\x64\pdftoppm.exe` |
+| 右侧栏能预览 PDF（内置 pdf.js） | `dsh-client-ui-sidebar-documentpreview/lib/client.js:26708` `extensions: ["pdf"]` |
+| 我们的 JSON 信封在会话记录里**逐字节保留** | `tests/manual/envelope_survives.mjs`：742 条 tool/result 中 `re-dump matches recorded text: true`（见 §9.2） |
 
 ---
 
@@ -174,10 +178,23 @@ DSH 早就有「把文件交给用户」的正式通道，本方案**不重复�
 | `MEDIA_MCP_ROOTS` | 允许发布的根目录（`;` 分隔） | 仓库根目录 |
 | `MEDIA_MCP_MAX_BYTES` | 体积上限 | `20971520`（20 MiB） |
 | `MEDIA_MCP_FS_CWD` | `fs-sandbox.cwd` 的路径，用来校验同盘 | 仓库根目录 |
+| `MEDIA_MCP_PDF_PAGES` | PDF 首页预览最多转几页 | `3` |
+| `MEDIA_MCP_PDF_DPI` | 光栅化 DPI | `110` |
+| `MEDIA_MCP_PDFTOPPM` | `pdftoppm` 可执行文件 | 随 MiKTeX 的那个 |
 
 `MEDIA_MCP_FS_CWD` 必须是**安装脚本写入的那个值**，不允许各写各的——两处不一致就是"引用永远 404"这类故障的温床。
 
-### 6.5 工具描述就是行为层（硬要求）
+### 6.5 PDF 光栅化
+
+`kind == "pdf"` 时，MCP 额外做一步：用 `pdftoppm -png -r <dpi> -f 1 -l <pages>` 把前若干页转成 PNG，写到 `<render root>/_pdf/<sha1 前 12 位>/page-01.png`，并把它们作为**额外的 image 媒体描述符**放进信封。
+
+- 页数上限 **3**（`MEDIA_MCP_PDF_PAGES`，见 §6.4）
+- DPI 默认 **110**（够看清正文，单页约 100–200 KB，远离 20 MiB 上限）
+- 目录用**内容哈希**命名：同一份 PDF 重复发布不会反复转换，也不会因文件名碰撞互相覆盖
+- 转换失败（PDF 损坏、`pdftoppm` 缺失）**不让整次发布失败**：信封仍返回 PDF 本身与右侧栏按钮，另在 `warnings` 里说明"首页预览不可用"
+- 总页数写进 `media.pages`，卡片据此显示"共 N 页，显示前 3 页"
+
+### 6.6 工具描述就是行为层（硬要求）
 
 按 §3.2 的实测结论，**不配 skill**，全部行为规范由 `publish_file` 的 `description` 承载。它必须明确回答四件事：
 
@@ -220,7 +237,7 @@ key 必须是 **`mcp__media__publish_file`** 这个字面量。契约明确写�
 | `image` | `<img>` | |
 | `video` | `<video controls preload="metadata">` | 不自动播放 |
 | `audio` | `<audio controls>` | |
-| `pdf` | `<iframe>` **（待实测，见 §9）** | 不通过则退化为"在右侧栏打开" |
+| `pdf` | **光栅化后走图片通道**：MCP 用 `pdftoppm` 把前 ≤3 页转成 PNG，按 `image` 渲染；卡片另给"翻看完整 PDF"按钮 | 见 §9.1：`<iframe>` 被 shipped 的 sandbox CSP 判死，这是实测后的替代方案 |
 | `text` | `<pre>` 前 **40 行** + 总行数；末尾注明"已截断" | 40 是一个屏幕放得下又不至于只剩两行的数 |
 | `other` | 图标 + 文件名 + 大小 + 打开/下载 | |
 
@@ -247,16 +264,47 @@ key 必须是 **`mcp__media__publish_file`** 这个字面量。契约明确写�
 
 ---
 
-## 9. 实现前必须实测的两个未知项
+## 9. 两个曾列为未知、现已实测的结论
 
-**在写渲染器之前**先把这两条测掉；它们可能改变 §7.3 的实现，但不改变架构。
+设计初稿把两条留作"实现前先测"。它们已在 2026-09-14 实测完毕，**不再是未知项**，下面写的是结论与证据。
 
-1. **PDF 能否在 `<iframe>` 里显示。**
-   `/api/file` 的响应带 *sandbox CSP*（防止直接打开的 HTML/SVG 以 API origin 执行）。浏览器内置 PDF 阅读器**可能**被它拦住。做法：装一个真实 PDF，在页面里开一次 iframe 观察；不通过就退回"点击在右侧栏用 shipped 的 pdf.js 打开"。
-   **不预先承诺内嵌 PDF。**
+### 9.1 PDF 不能内嵌 `<iframe>`，改用光栅化
 
-2. **`ToolResultNode.content` 里我们的文本块是否原样保留。**
-   `dsh-mcp-client` 的 `projectContent` 会重排文本块（相邻文本 run 合并）。我们的 JSON 是单个 text 块，预期原样，但**必须先做一次真实调用**把结果打出来看，再写解析代码。若被改写，退化为从信封里取一个更稳的载体。
+对真实文件发 `HEAD /api/file`，响应头是：
+
+```
+content-type: application/pdf
+content-security-policy: sandbox; default-src 'none'
+cache-control: private, no-store
+x-content-type-options: nosniff
+```
+
+`sandbox` **不带任何 `allow-*` 令牌**，等于施加全部沙箱限制：唯一源、禁脚本、禁插件。浏览器内置 PDF 阅读器在这种 frame 里不会渲染，因此 `<iframe src="/api/file?...">` 这条路判死。
+
+替代方案（已确认工具存在，无需新依赖）：
+
+| 工具 | 位置 | 备注 |
+|---|---|---|
+| `pdftoppm` / `pdftocairo` | `…\MiKTeX\miktex\bin\x64\` | **MiKTeX 自带**，而 MiKTeX 是本项目既有依赖（Manim 的 LaTeX 需要） |
+| Python `fitz` / `pdf2image` / `PIL` | 本机已装 | 备用，但会新增 Python 依赖，**不采用** |
+
+所以 `pdf` 的处理是：MCP 用 `pdftoppm` 把**前 ≤3 页**转成 PNG（放在与渲染产物同一根下），返回成 `image` 媒体描述符，走**已经验证过的图片通道**内嵌；卡片同时给出页数与"翻看完整 PDF"按钮，点击走右侧栏——`dsh-client-ui-sidebar-documentpreview` 注册了 `extensions: ["pdf"]`（`client.js:26708`）并内置 pdf.js，这条 fallback 是成立的。
+
+**上限 3 页**与"一轮最多发 3 个"同源：一份 50 页的 PDF 不该变成 50 张图刷屏。
+
+### 9.2 信封在会话日志里原样保留
+
+渲染器要 `JSON.parse(ToolResultNode.content` 里的 text 块 `)`。实测：写 `tests/manual/envelope_survives.mjs` 解压当前会话全部 zstd 帧（2952 帧 / 5053 条记录），在 **742 条 tool/result** 里找到带信封的那条，并断言
+
+```
+re-dump matches recorded text: true
+```
+
+即记录下来的文本块与 `json.dumps(envelope, indent=2)` **逐字节一致**——`dsh-mcp-client` 的 `projectContent` 只合并相邻文本 run，不碰我们的内容。
+
+> 这个脚本本身也踩了一个坑，值得记下：最初按"记录里出现 `previewMarkdown`"筛选，结果被**本会话自己的命令输出**污染了——我跑过的命令 stdout 也进日志，而搜索脚本的源码里就含这个词。判据必须收紧成"这个文本块能 `JSON.parse` 成带 `runId` 的信封"。
+
+结论：解析是实现细节，不是风险。但 §8 第 1 条（解析失败不得抛异常）仍然保留——契约稳定不等于可以不做防御。
 
 ---
 
@@ -299,7 +347,7 @@ key 必须是 **`mcp__media__publish_file`** 这个字面量。契约明确写�
 ## 13. 判据
 
 1. 模型调用 `mcp__media__publish_file` 后，**视频在对话流里直接播放**。
-2. 音频直接播放；PDF 直接翻看（或按 §9 的实测结论退化为一次点击）。
+2. PDF **前 3 页以图片内嵌**（走已验证的图片通道），并有"翻看完整 PDF"按钮打开右侧栏 pdf.js。
 3. 任意其它格式有文件名/类型/大小/可打开。
 4. 六种失败各有一条可读提示，且**没有任何一条会发出注定失败的引用**。
 5. 未覆盖任何 shipped UI：`git grep` 与 Inspect 双重确认我们只占了 `mcp__media__publish_file` 这一个 key；`present` 与 `conversation.chat.turnTail` 未被触碰。
