@@ -24,8 +24,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 MANIM_BLOCK_ID = "mcp-manim"
+MEDIA_BLOCK_ID = "mcp-media"
 FS_BLOCK_ID = "fs-sandbox"
 GALLERY_PACKAGE = "dsh-manim-gallery"
+MEDIA_PACKAGE = "dsh-media-view"
 PANEL_ID = "manim-gallery"
 SKILL_NAME = "manim-explainer"
 
@@ -50,6 +52,8 @@ class Targets:
     python: str
     manim: str | None
     ffmpeg: str | None
+    pdftoppm: str = "pdftoppm"
+    pdfinfo: str = "pdfinfo"
 
     def __post_init__(self) -> None:
         if not self.render_root.is_absolute():
@@ -82,12 +86,24 @@ class Targets:
         return self.plugin_dir / "lib" / "index.js"
 
     @property
+    def media_plugin_dir(self) -> Path:
+        return self.plugin_root / MEDIA_PACKAGE
+
+    @property
+    def media_client_file(self) -> Path:
+        return self.media_plugin_dir / "lib" / "client.js"
+
+    @property
     def skill_dir(self) -> Path:
         return self.skill_root / SKILL_NAME
 
     @property
     def module_link(self) -> Path:
         return self.profile_root / "node_modules" / GALLERY_PACKAGE
+
+    @property
+    def media_module_link(self) -> Path:
+        return self.profile_root / "node_modules" / MEDIA_PACKAGE
 
 
 def _yaml_scalar(value: str) -> str:
@@ -126,6 +142,43 @@ def build_manim_insert_block(targets: Targets) -> str:
             "        failOnStartupError: true",
             "        env:",
             *env_lines,
+            "",
+        ]
+    )
+
+
+def build_media_insert_block(targets: Targets) -> str:
+    """The `- insert:` entry that mounts the media MCP.
+
+    `root` here is the SAME expression `build_fs_overlay_block` pins — one source of
+    truth for "the artefact and the filesystem provider share a drive", because two
+    sources is precisely how the in-answer reference turns into a silent 404.
+
+    The env keys must match `media_mcp.config.load_config` exactly. They are spelled
+    out here rather than derived, so a rename shows up as a failing installer test
+    instead of a runtime KeyError inside a child process.
+    """
+    root = targets.render_root.parent
+    server = targets.source_root / "media-mcp" / "server.py"
+    return "\n".join(
+        [
+            "# media MCP — 通用文件发布通道（由 install.ps1 维护，可重复执行）",
+            "- insert:",
+            f"    - id: {MEDIA_BLOCK_ID}",
+            "      name: '@deepseek-ai/dsh-mcp-client'",
+            "      config:",
+            "        serverName: media",
+            "        transport: stdio",
+            f"        command: {_yaml_scalar(targets.python)}",
+            "        args:",
+            f"          - {_yaml_scalar(str(server))}",
+            "        failOnStartupError: true",
+            "        env:",
+            f"          MEDIA_MCP_PYTHON: {_yaml_scalar(targets.python)}",
+            f"          MEDIA_MCP_FS_CWD: {_yaml_scalar(root.as_posix())}",
+            f"          MEDIA_MCP_ROOTS: {_yaml_scalar(root.as_posix())}",
+            f"          MEDIA_MCP_PDFTOPPM: {_yaml_scalar(targets.pdftoppm)}",
+            f"          MEDIA_MCP_PDFINFO: {_yaml_scalar(targets.pdfinfo)}",
             "",
         ]
     )
@@ -217,9 +270,9 @@ def remove_insert_block(text: str, block_id: str) -> tuple[str, bool]:
 
 
 def plan_package_json(
-    text: str, *, plugin_dir: Path, remove: bool = False
+    text: str, *, plugin_dir: Path, package: str = GALLERY_PACKAGE, remove: bool = False
 ) -> tuple[str, bool]:
-    """Add or remove the gallery plugin's bundle entry and `link:` dependency."""
+    """Add or remove a plugin's bundle entry and `link:` dependency."""
     try:
         data = json.loads(text)
     except ValueError as error:
@@ -235,13 +288,13 @@ def plan_package_json(
     link = f"link:{plugin_dir.as_posix()}"
 
     if remove:
-        if GALLERY_PACKAGE in bundles:
-            bundles.remove(GALLERY_PACKAGE)
-        dependencies.pop(GALLERY_PACKAGE, None)
+        if package in bundles:
+            bundles.remove(package)
+        dependencies.pop(package, None)
     else:
-        if GALLERY_PACKAGE not in bundles:
-            bundles.append(GALLERY_PACKAGE)
-        dependencies[GALLERY_PACKAGE] = link
+        if package not in bundles:
+            bundles.append(package)
+        dependencies[package] = link
 
     changed = json.dumps(data, sort_keys=True) != before
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n", changed
@@ -296,12 +349,23 @@ def plan_install(targets: Targets) -> dict:
     on: a re-install still has to *replace* the MCP row (removing it and appending
     it again is how idempotence is achieved), so the row appears either way.
     """
+    has_media = (targets.source_root / "media-mcp" / "server.py").exists()
+    has_media_pkg = (targets.source_root / MEDIA_PACKAGE).exists()
+
     patch_text = _read(targets.patch_file)
     _, replaced = remove_insert_block(patch_text, MANIM_BLOCK_ID)
+    _, media_replaced = remove_insert_block(patch_text, MEDIA_BLOCK_ID)
 
-    _, package_changed = plan_package_json(
-        _read(targets.profile_package), plugin_dir=targets.plugin_dir
+    pkg_text = _read(targets.profile_package)
+    pkg_text, gallery_pkg_changed = plan_package_json(
+        pkg_text, plugin_dir=targets.plugin_dir, package=GALLERY_PACKAGE
     )
+    if has_media_pkg:
+        _, media_pkg_changed = plan_package_json(
+            pkg_text, plugin_dir=targets.media_plugin_dir, package=MEDIA_PACKAGE
+        )
+    else:
+        media_pkg_changed = False
 
     render_root_wanted = f'const RENDER_ROOT = "{targets.render_root.as_posix()}";'
     render_root_changed = render_root_wanted not in _read(targets.client_file)
@@ -309,6 +373,10 @@ def plan_install(targets: Targets) -> dict:
     steps = [
         Step("backup", {"path": str(targets.patch_file)}),
         Step("yaml-insert", {"id": MANIM_BLOCK_ID, "replaced": replaced}),
+    ]
+    if has_media:
+        steps.append(Step("yaml-insert-media", {"id": MEDIA_BLOCK_ID, "replaced": media_replaced}))
+    steps.append(
         Step(
             "pin-fs-cwd",
             {
@@ -319,7 +387,9 @@ def plan_install(targets: Targets) -> dict:
                 # reinstall while the plan claims the file is already current.
                 "changed": build_fs_overlay_block(targets).rstrip("\n") not in patch_text,
             },
-        ),
+        )
+    )
+    steps.append(
         Step(
             "copy-plugin",
             {
@@ -327,12 +397,27 @@ def plan_install(targets: Targets) -> dict:
                 "to": str(targets.plugin_dir),
                 "changed": not targets.plugin_dir.exists(),
             },
-        ),
-        Step("patch-package-json", {"changed": package_changed}),
+        )
+    )
+    if has_media_pkg:
+        steps.append(
+            Step(
+                "copy-media-plugin",
+                {
+                    "from": str(targets.source_root / MEDIA_PACKAGE),
+                    "to": str(targets.media_plugin_dir),
+                    "changed": not targets.media_plugin_dir.exists(),
+                },
+            )
+        )
+    steps.append(Step("patch-package-json", {"changed": gallery_pkg_changed or media_pkg_changed}))
+    steps.append(
         Step(
             "patch-render-root",
             {"changed": render_root_changed or not targets.client_file.exists()},
-        ),
+        )
+    )
+    steps.append(
         Step(
             "link-package",
             {
@@ -340,7 +425,20 @@ def plan_install(targets: Targets) -> dict:
                 "cwd": str(targets.profile_root),
                 "changed": not targets.module_link.exists(),
             },
-        ),
+        )
+    )
+    if has_media_pkg:
+        steps.append(
+            Step(
+                "link-media-package",
+                {
+                    "package": MEDIA_PACKAGE,
+                    "cwd": str(targets.profile_root),
+                    "changed": not targets.media_module_link.exists(),
+                },
+            )
+        )
+    steps.append(
         Step(
             "copy-skill",
             {
@@ -348,7 +446,9 @@ def plan_install(targets: Targets) -> dict:
                 "to": str(targets.skill_dir),
                 "changed": not targets.skill_dir.exists(),
             },
-        ),
+        )
+    )
+    steps.append(
         Step(
             "verify-selftest",
             {
@@ -358,8 +458,21 @@ def plan_install(targets: Targets) -> dict:
                     "--selftest",
                 ]
             },
-        ),
-    ]
+        )
+    )
+    if has_media:
+        steps.append(
+            Step(
+                "verify-media-selftest",
+                {
+                    "command": [
+                        targets.python,
+                        str(targets.source_root / "media-mcp" / "server.py"),
+                        "--selftest",
+                    ]
+                },
+            )
+        )
     changed = any(step.detail.get("changed") is True for step in steps)
     return {
         "action": "install",
@@ -370,19 +483,38 @@ def plan_install(targets: Targets) -> dict:
 
 def plan_uninstall(targets: Targets) -> dict:
     _, present = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    _, media_present = remove_insert_block(_read(targets.patch_file), MEDIA_BLOCK_ID)
     _, fs_present = remove_insert_block(_read(targets.patch_file), FS_BLOCK_ID)
-    _, package_changed = plan_package_json(
-        _read(targets.profile_package), plugin_dir=targets.plugin_dir, remove=True
+    pkg_text, package_changed = plan_package_json(
+        _read(targets.profile_package), plugin_dir=targets.plugin_dir, package=GALLERY_PACKAGE, remove=True
+    )
+    pkg_text, media_package_changed = plan_package_json(
+        pkg_text, plugin_dir=targets.media_plugin_dir, package=MEDIA_PACKAGE, remove=True
     )
     steps = [
         Step("backup", {"path": str(targets.patch_file)}),
         Step("yaml-remove", {"id": MANIM_BLOCK_ID, "present": present, "changed": present}),
+    ]
+    if media_present:
+        steps.append(
+            Step("yaml-remove-media", {"id": MEDIA_BLOCK_ID, "present": media_present, "changed": media_present})
+        )
+    steps.extend([
         Step("unpin-fs-cwd", {"id": FS_BLOCK_ID, "present": fs_present, "changed": fs_present}),
-        Step("remove-package-json-entry", {"changed": package_changed}),
+        Step("remove-package-json-entry", {"changed": package_changed or media_package_changed}),
         Step(
             "remove-plugin-dir",
             {"path": str(targets.plugin_dir), "changed": targets.plugin_dir.exists()},
         ),
+    ])
+    if targets.media_plugin_dir.exists():
+        steps.append(
+            Step(
+                "remove-media-plugin-dir",
+                {"path": str(targets.media_plugin_dir), "changed": targets.media_plugin_dir.exists()},
+            )
+        )
+    steps.extend([
         Step(
             "remove-skill-dir",
             {"path": str(targets.skill_dir), "changed": targets.skill_dir.exists()},
@@ -395,7 +527,18 @@ def plan_uninstall(targets: Targets) -> dict:
                 "changed": targets.module_link.exists() or targets.module_link.is_symlink(),
             },
         ),
-    ]
+    ])
+    if targets.media_module_link.exists() or targets.media_module_link.is_symlink():
+        steps.append(
+            Step(
+                "unlink-media-package",
+                {
+                    "package": MEDIA_PACKAGE,
+                    "cwd": str(targets.profile_root),
+                    "changed": targets.media_module_link.exists() or targets.media_module_link.is_symlink(),
+                },
+            )
+        )
     changed = any(step.detail.get("changed") is True for step in steps)
     return {
         "action": "uninstall",
@@ -423,12 +566,22 @@ def apply_install(targets: Targets, *, copy_plugin: bool = True, link: bool = Tr
     _backup(targets.patch_file)
 
     stripped, _ = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    stripped, _ = remove_insert_block(stripped, MEDIA_BLOCK_ID)
     stripped, _ = remove_insert_block(stripped, FS_BLOCK_ID)
     if stripped and not stripped.endswith("\n"):
         stripped += "\n"
+
+    media_block = (
+        build_media_insert_block(targets)
+        if (targets.source_root / "media-mcp" / "server.py").exists()
+        else ""
+    )
     _write(
         targets.patch_file,
-        stripped + build_manim_insert_block(targets) + build_fs_overlay_block(targets),
+        stripped
+        + build_manim_insert_block(targets)
+        + media_block
+        + build_fs_overlay_block(targets),
     )
 
     if copy_plugin:
@@ -439,10 +592,24 @@ def apply_install(targets: Targets, *, copy_plugin: bool = True, link: bool = Tr
             targets.plugin_dir,
             ignore=shutil.ignore_patterns("test", "node_modules", "__pycache__"),
         )
+        if (targets.source_root / MEDIA_PACKAGE).exists():
+            if targets.media_plugin_dir.exists():
+                shutil.rmtree(targets.media_plugin_dir)
+            shutil.copytree(
+                targets.source_root / MEDIA_PACKAGE,
+                targets.media_plugin_dir,
+                ignore=shutil.ignore_patterns("test", "node_modules", "__pycache__"),
+            )
 
     package_path = targets.profile_package
     _backup(package_path)
-    planned, _ = plan_package_json(_read(package_path), plugin_dir=targets.plugin_dir)
+    planned, _ = plan_package_json(
+        _read(package_path), plugin_dir=targets.plugin_dir, package=GALLERY_PACKAGE
+    )
+    if (targets.source_root / MEDIA_PACKAGE).exists():
+        planned, _ = plan_package_json(
+            planned, plugin_dir=targets.media_plugin_dir, package=MEDIA_PACKAGE
+        )
     _write(package_path, planned)
 
     # Guarded because the file-surgery tests run without a copy, and
@@ -460,7 +627,11 @@ def apply_install(targets: Targets, *, copy_plugin: bool = True, link: bool = Tr
         shutil.copytree(source_skill, targets.skill_dir)
 
     if link:
-        _link_package(targets)
+        _link_package(targets, plugin_dir=targets.plugin_dir, link_path=targets.module_link)
+        if (targets.source_root / MEDIA_PACKAGE).exists():
+            _link_package(
+                targets, plugin_dir=targets.media_plugin_dir, link_path=targets.media_module_link
+            )
     return plan
 
 
@@ -469,6 +640,7 @@ def apply_uninstall(targets: Targets, *, purge_renders: bool = False) -> dict:
     _backup(targets.patch_file)
 
     stripped, _ = remove_insert_block(_read(targets.patch_file), MANIM_BLOCK_ID)
+    stripped, _ = remove_insert_block(stripped, MEDIA_BLOCK_ID)
     stripped, _ = remove_insert_block(stripped, FS_BLOCK_ID)
     _write(targets.patch_file, stripped)
 
@@ -476,19 +648,26 @@ def apply_uninstall(targets: Targets, *, purge_renders: bool = False) -> dict:
     if package_path.exists():
         _backup(package_path)
         planned, _ = plan_package_json(
-            _read(package_path), plugin_dir=targets.plugin_dir, remove=True
+            _read(package_path), plugin_dir=targets.plugin_dir, package=GALLERY_PACKAGE, remove=True
+        )
+        planned, _ = plan_package_json(
+            planned, plugin_dir=targets.media_plugin_dir, package=MEDIA_PACKAGE, remove=True
         )
         _write(package_path, planned)
 
     shutil.rmtree(targets.plugin_dir, ignore_errors=True)
+    shutil.rmtree(targets.media_plugin_dir, ignore_errors=True)
     shutil.rmtree(targets.skill_dir, ignore_errors=True)
-    _unlink_package(targets)
+    _unlink_package(targets.module_link)
+    _unlink_package(targets.media_module_link)
     if purge_renders:
         shutil.rmtree(targets.render_root, ignore_errors=True)
     return plan
 
 
-def _link_package(targets: Targets) -> None:
+def _link_package(
+    targets: Targets, plugin_dir: Path | None = None, link_path: Path | None = None
+) -> None:
     """Create the node_modules link pnpm would create for a `link:` dependency.
 
     Done directly rather than by shelling out to pnpm: the link is one symlink,
@@ -499,14 +678,15 @@ def _link_package(targets: Targets) -> None:
     node_modules = targets.profile_root / "node_modules"
     node_modules.mkdir(parents=True, exist_ok=True)
 
-    link = targets.module_link
+    link = link_path or targets.module_link
+    target_dir = plugin_dir or targets.plugin_dir
     if link.is_symlink() or link.is_file():
         link.unlink()
     elif link.is_dir():
         shutil.rmtree(link)
 
     try:
-        link.symlink_to(targets.plugin_dir, target_is_directory=True)
+        link.symlink_to(target_dir, target_is_directory=True)
     except OSError as error:
         raise InstallerError(
             f"cannot create the node_modules link {link}: {error}. "
@@ -515,8 +695,7 @@ def _link_package(targets: Targets) -> None:
         ) from error
 
 
-def _unlink_package(targets: Targets) -> None:
-    link = targets.module_link
+def _unlink_package(link: Path) -> None:
     try:
         if link.is_symlink() or link.is_file():
             link.unlink()
@@ -524,6 +703,21 @@ def _unlink_package(targets: Targets) -> None:
             shutil.rmtree(link)
     except OSError:
         pass
+
+
+def _which_or_miktex(name: str) -> str:
+    """`pdftoppm` / `pdfinfo` ship inside MiKTeX, which is not always on PATH."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for candidate in (
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "MiKTeX/miktex/bin/x64",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/MiKTeX/miktex/bin/x64",
+    ):
+        exe = candidate / f"{name}.exe"
+        if exe.exists():
+            return str(exe)
+    return name
 
 
 def _add_common_arguments(parser: argparse.ArgumentParser) -> None:
@@ -564,6 +758,8 @@ def _targets_from(args: argparse.Namespace) -> Targets:
         python=args.python,
         manim=args.manim,
         ffmpeg=args.ffmpeg,
+        pdftoppm=_which_or_miktex("pdftoppm"),
+        pdfinfo=_which_or_miktex("pdfinfo"),
     )
 
 
