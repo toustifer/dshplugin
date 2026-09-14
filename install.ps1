@@ -73,5 +73,8 @@ if ($DryRun) {
 } else {
     Write-Host "`n安装完成。**必须重启 dsh web 才会生效**：" -ForegroundColor Green
     Write-Host "  & `"$HOME\.dsh\restart-web.ps1`""
-    Write-Host "重启后应能看到：左侧栏多出一个「动画库」图标；对话里问一个值得画的问题会内嵌动画。"
+    Write-Host "重启后应能看到："
+    Write-Host "  1. 会话头部右上角「动画库」图标（右侧展开，不占全屏）；"
+    Write-Host "  2. 工具列表增加 mcp__media__publish_file，支持在对话里内嵌视频、音频、PDF首页预览及各种文件；"
+    Write-Host "  3. 问一个值得画的问题，正文会内嵌 Manim 动画。"
 }

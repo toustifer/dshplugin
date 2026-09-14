@@ -8,6 +8,8 @@
 |---|---|---|
 | **渲染引擎** | `manim-mcp/` | 一个 stdio MCP 服务，向模型暴露 8 个工具：4 个声明式模板（公式推导 / 函数图像 / 流程结构 / 左右对照）、1 个任意代码逃生口、以及 `check` / `style_guide` / `runs`。负责把模板编译成 Manim 源码、调用 Manim 渲染、后处理成 GIF/WebP/PNG 预览、把失败解析成带行号与修法的结构化诊断。 |
 | **动画库面板** | `dsh-manim-gallery/` | 一个 DSH 原生插件，注册一个**右侧栏 tab**（页面型，`kind: manim-gallery`）：网格预览全部历史动画、搜索筛选排序、点开用 `<video controls>` 看 MP4。**只读**。入口只有**会话头部右上角**的一个图标按钮；点击后 `sidebarRight.openTab` 让右栏**在旁边展开**，不占用主区、不覆盖页面。左侧栏入口与全页版面板都已移除。 |
+| **媒体发布服务** | `media-mcp/` | 一个独立的 stdio MCP 服务，仅依赖 Python 标准库，向模型暴露 `publish_file` 工具：校验路径、嗅探 MIME、生成同源引用、对 PDF 光栅化前 3 页作为图预览，返回通用媒体信封。 |
+| **媒体卡片渲染** | `dsh-media-view/` | 一个 DSH 原生 client 插件，注册 `tool.call.toolview`（key = `mcp__media__publish_file`）：在对话流里按模态内嵌播放视频、音频、显示图片与 PDF 多页预览，或提供右侧栏打开按钮。 |
 | **行为层** | `skills/manim-explainer/SKILL.md` | 教会模型：什么时候画、选哪个工具、画砸了怎么自愈、以及硬性要求（非空时必须原样贴 `previewMarkdown`、图前后各一句点明关系、一轮最多一张）。 |
 
 产物落在 `renders/`，每条 run 一个目录，含 `scene.py`（可复现可再编辑）、`out/`（mp4/gif/png）、`run.json`；根部的 `renders/index.json` 是面板的数据源。
@@ -135,7 +137,8 @@ D:\ProgramData\anaconda3\python.exe tests\manual\export_last_frames.py   # 导�
 | 现象 | 先看哪里 |
 |---|---|
 | 对话里不出动画 | 先跑 `manim-mcp\server.py --selftest`，它会把依赖与渲染链一次性验完并给出退出码 |
-| 工具列表里没有 `mcp__manim__*` | `failOnStartupError: true` 会让 MCP 启动失败显式暴露。看 dsh 启动日志里的 `mcp-client(manim)` |
+| 工具列表里没有 `mcp__manim__*` 或 `mcp__media__*` | `failOnStartupError: true` 会让 MCP 启动失败显式暴露。看 dsh 启动日志里的 `mcp-client(manim)` 或 `mcp-client(media)` |
+| 发布文件后卡片空白/未渲染 | 检查插件是否注册 `mcp__media__publish_file`，跑 `media-mcp\server.py --doctor` 查看环境路径 |
 | 图片位置是空的/裂图 | 跑 `node tests\manual\probe_file_api.mjs`。它对运行中的 Host 实测那条引用，能直接区分「路径形式不对」「`fs-sandbox.cwd` 没钉在同一个盘符」「产物被删了」「鉴权没带上」 |
 | 面板能打开但读不到数据 | 面板会显示它**尝试读取的绝对路径**。核对它与 MCP 的 `MANIM_MCP_RENDER_ROOT` 是否一致 |
 | 缩略图空白 | 在**已登录的浏览器**里打开 `/api/file?path=…`。401 = 鉴权没带上；404 = 产物被删了 |
@@ -146,11 +149,14 @@ D:\ProgramData\anaconda3\python.exe tests\manual\export_last_frames.py   # 导�
 
 ## 文档索引
 
-- **设计文档**：`docs/superpowers/specs/2026-09-12-manim-visual-explainer-design.md`（20 节，含每一条设计决策的依据与实测数据）
+- **设计文档**：
+  - `docs/superpowers/specs/2026-09-12-manim-visual-explainer-design.md`（动画引擎与动画库设计）
+  - `docs/superpowers/specs/2026-09-14-media-publish-channel-design.md`（通用多模态文件发布通道设计）
 - **实施计划**：
   - `docs/superpowers/plans/2026-09-12-manim-mcp-engine.md`（渲染引擎，已执行完毕，末尾有 20 条偏离记录）
   - `docs/superpowers/plans/2026-09-12-manim-gallery-panel.md`（面板，已执行完毕）
-  - `docs/superpowers/plans/2026-09-12-manim-skill-and-install.md`（本文件描述的安装接入）
+  - `docs/superpowers/plans/2026-09-12-manim-skill-and-install.md`（安装接入与验收）
+  - `docs/superpowers/plans/2026-09-14-media-publish-channel.md`（通用多模态文件发布实施计划）
 
 ## 边界
 
