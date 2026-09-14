@@ -181,6 +181,7 @@ DSH 早就有「把文件交给用户」的正式通道，本方案**不重复�
 | `MEDIA_MCP_PDF_PAGES` | PDF 首页预览最多转几页 | `3` |
 | `MEDIA_MCP_PDF_DPI` | 光栅化 DPI | `110` |
 | `MEDIA_MCP_PDFTOPPM` | `pdftoppm` 可执行文件 | 随 MiKTeX 的那个 |
+| `MEDIA_MCP_PDFINFO` | `pdfinfo` 可执行文件 | 随 MiKTeX 的那个 |
 
 `MEDIA_MCP_FS_CWD` 必须是**安装脚本写入的那个值**，不允许各写各的——两处不一致就是"引用永远 404"这类故障的温床。
 
