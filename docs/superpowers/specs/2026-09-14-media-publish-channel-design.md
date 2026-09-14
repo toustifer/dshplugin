@@ -63,6 +63,42 @@ Manim 那条线只解决了图片：动画的 GIF 能内嵌进回答正文，因
 
 它的位置是**工具卡片**（对话流里，工具调用处），不是助手文字段落中间。这一点用户已明确接受。**和图片的体验一致**：工具返回描述符，界面自动渲染，用户什么都不用做。
 
+### 3.1 官方既有的交付通道，以及本方案补的是哪一块
+
+DSH 早就有「把文件交给用户」的正式通道，本方案**不重复它、也不接管它**：
+
+| 官方件 | 作用 |
+|---|---|
+| `dsh-tool-present`（工具名 `present`） | 声明"这些文件是交付物" |
+| `dsh-client-ui-deliverables` | 它的 UI：注册 `tool.call.toolview` key **`present`**（已被占用）与 `conversation.chat.turnTail`——**每轮结束的「产物行」** |
+
+两条关键事实：
+
+1. **产物行的词汇来自 mutation 工具的 `locations` 元数据**，不靠模型记得说。也就是说 `write`/`edit` 产出的文件**自动**会被列出来。
+2. **每个 chip 的打开方式是"右侧栏的文本预览 tab"**（README 原文：*"opens the file through the owner's `openFile`, which the chat view routes to the right Sidebar as a text-preview tab"*）。
+
+**所以缺口是真实且官方未覆盖的**：DSH 能*列出*产物、能以文本预览打开，但**不能播放视频、不能翻 PDF、不能播音频**。本方案补的正是这一段——内嵌播放，而不是又一个"列出 + 打开"。
+
+因此：**不注册 `present` 的 key**（已被占用，接管它等于破坏官方交付物体验），也不去动 `conversation.chat.turnTail` 的产物行。
+
+### 3.2 行为引导放在哪：工具描述，不配 skill
+
+这是实测出来的官方做法，本方案照做。
+
+| 能力 | 行为引导写在哪 | 有 skill 吗 |
+|---|---|---|
+| 发图片（`read_image`） | 工具自己的 `description` | **没有** |
+| 交付文件（`present`） | 工具自己的 `description`（`dsh-tool-present/lib/index.js:25`，即"you must call present after writing it and before your final response"那段） | **没有** |
+| 画动画（本项目的 `manim-explainer`） | skill | 有（这是**本项目**加的，不是官方做法） |
+
+证据：`dsh-tool-present` 整个包里 `prompt` / `skill` / `systemPrompt` / `instructions` **零命中**；两个 skills 目录里也没有任何讲附件的 skill。
+
+**为什么这里不该用 skill**：skill 要靠路由器匹配才会被加载，而**加载失败正是我们最怕的那个失败模式**——模型做了视频却忘了发布。工具描述则**永远在上下文里**。官方把这段引导放进工具描述而不是 skill，正是这个道理。
+
+所以 `publish_file` 的 `description` 必须自己承载全部行为规范：什么时候发、什么时候不发、一轮最多发几个、什么格式不值得发。这一条是硬要求，不是"最好有"。
+
+> 注：本项目已有的 `manim-explainer` skill 保持不动。它管的是"什么时候画"，与"什么时候发布"是两件事，各自独立。
+
 ---
 
 ## 4. 架构
@@ -140,6 +176,17 @@ Manim 那条线只解决了图片：动画的 GIF 能内嵌进回答正文，因
 | `MEDIA_MCP_FS_CWD` | `fs-sandbox.cwd` 的路径，用来校验同盘 | 仓库根目录 |
 
 `MEDIA_MCP_FS_CWD` 必须是**安装脚本写入的那个值**，不允许各写各的——两处不一致就是"引用永远 404"这类故障的温床。
+
+### 6.5 工具描述就是行为层（硬要求）
+
+按 §3.2 的实测结论，**不配 skill**，全部行为规范由 `publish_file` 的 `description` 承载。它必须明确回答四件事：
+
+1. **什么时候该发**：产出的是用户要「看/听/读」的东西（视频、音频、PDF、图片、报告），且用文字描述不如直接给。
+2. **什么时候不该发**：中间产物、日志、调试截图；用户没要看的；一句话就能说清的东西；同一份文件重复发。
+3. **一轮最多发几个**：定 **3 个**。再多就变成刷屏，重点被淹没——与 `manim-explainer`「一轮最多 1 个动画」同源的理由。
+4. **超限怎么办**：明说 20 MiB 上限，超了要么先压缩/切片，要么把路径以文字给出并说明原因，**不要反复重试**。
+
+描述是模型唯一会读到的规范，写含糊等于没有。它也要说清失败时会返回 `reason`，模型据此纠正而不是盲目重试。
 
 ---
 
@@ -244,6 +291,8 @@ key 必须是 **`mcp__media__publish_file`** 这个字面量。契约明确写�
 - 不做用户→模型的上传方向（那需要一个不同的入口，与本方案的通道无关）。
 - 不加新的右侧栏 tab，复用 `documentpreview`。
 - 不做转码/缩略图生成（ffmpeg 是 Manim 那条线的依赖，本通道不引入）。
+- **不配 skill**（§3.2：官方做法是把行为写进工具描述；skill 有"加载不上"的失败模式）。
+- **不接管 `present` 的 key**，也不动 `conversation.chat.turnTail` 的产物行（§3.1：那是官方交付物体验）。
 
 ---
 
@@ -253,8 +302,9 @@ key 必须是 **`mcp__media__publish_file`** 这个字面量。契约明确写�
 2. 音频直接播放；PDF 直接翻看（或按 §9 的实测结论退化为一次点击）。
 3. 任意其它格式有文件名/类型/大小/可打开。
 4. 六种失败各有一条可读提示，且**没有任何一条会发出注定失败的引用**。
-5. 未覆盖任何 shipped UI：`git grep` 与 Inspect 双重确认我们只占了 `mcp__media__publish_file` 这一个 key。
-6. Manim 那条线的两套测试（engine 401 / panel 78）保持全绿。
-7. 卸载后 `cordis.patch.yml` 与 `package.json` 逐字节还原。
+5. 未覆盖任何 shipped UI：`git grep` 与 Inspect 双重确认我们只占了 `mcp__media__publish_file` 这一个 key；`present` 与 `conversation.chat.turnTail` 未被触碰。
+6. `publish_file` 的 `description` 四问齐备（何时发/何时不发/上限个数/超限怎么办），且不依赖任何 skill 被加载。
+7. Manim 那条线的两套测试（engine 401 / panel 78）保持全绿。
+8. 卸载后 `cordis.patch.yml` 与 `package.json` 逐字节还原。
 
-**这 7 条全部满足，这个特性才算做完。**
+**这 8 条全部满足，这个特性才算做完。**
