@@ -74,7 +74,7 @@ class Config:
 
 def load_config(env: dict[str, str] | None = None) -> Config:
     source = dict(os.environ if env is None else env)
-    render_root = DEFAULT_RENDER_ROOT
+    render_root = Path(source.get("MEDIA_MCP_RENDER_ROOT") or DEFAULT_RENDER_ROOT)
     root = render_root.parent
     return Config(
         roots=_path_list(source, "MEDIA_MCP_ROOTS", root),
