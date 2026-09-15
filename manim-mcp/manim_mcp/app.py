@@ -12,9 +12,12 @@ import asyncio
 import dataclasses
 import logging
 import sys
-from typing import Literal
+from contextlib import AbstractAsyncContextManager
+from collections.abc import Callable
+from typing import Any, Literal
 
 from fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings
 from mcp.types import ImageContent, TextContent
 
 from . import config as config_mod
@@ -26,6 +29,17 @@ from .tools import runs as runs_tool
 from .tools import style_guide as style_guide_tool
 
 LOG = logging.getLogger("manim-mcp")
+
+# fastmcp 3.4.0 leaves the generic lifespan annotation unresolved under
+# pydantic-settings 2.15; rebuild it before Settings is instantiated.
+Settings.model_rebuild(
+    _types_namespace={
+        "FastMCP": FastMCP,
+        "LifespanResultT": Any,
+        "Callable": Callable,
+        "AbstractAsyncContextManager": AbstractAsyncContextManager,
+    }
+)
 
 Quality = Literal["draft", "final"]
 

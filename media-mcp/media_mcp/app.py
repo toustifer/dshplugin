@@ -10,7 +10,21 @@ from __future__ import annotations
 
 import sys
 
+from contextlib import AbstractAsyncContextManager
+from collections.abc import Callable
+from typing import Any
+
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Settings
+
+Settings.model_rebuild(
+    _types_namespace={
+        "FastMCP": FastMCP,
+        "LifespanResultT": Any,
+        "Callable": Callable,
+        "AbstractAsyncContextManager": AbstractAsyncContextManager,
+    }
+)
 
 from .config import load_config
 from .tools.publish import publish
