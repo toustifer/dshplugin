@@ -20,7 +20,7 @@
 核心安装逻辑由 `tools/dsh_installer.py` 保障，它通过 pytest 进行逐字节的安装/卸载还原断言。
 
 ```powershell
-cd D:\myprogram\dshplugin
+cd <path-to-dshplugin>
 
 # 1. 模拟执行：检查各项环境与即将修改的文件（绝不写入任何文件）
 .\install.ps1 -DryRun
@@ -43,20 +43,20 @@ cd D:\myprogram\dshplugin
 这是 Windows 系统与 Node.js 宿主环境最具欺骗性的陷阱，务必牢记：
 
 ### 陷阱机制
-在前端对话流中，Markdown 仅接受以 `/` 开头的同源路径（如 `![anim](/myprogram/dshplugin/renders/.../out.gif)`）。
+在前端对话流中，Markdown 仅接受以 `/` 开头的同源路径（如 `![anim](/path/to/renders/.../out.gif)`）。
 Node.js 宿主端收到该路径后通过 `node:path.resolve(cwd, target)` 解析：
 - 当实参以 `/` 开头时，**Node.js 会直接抛弃 `cwd` 中的所有目录层级，仅仅保留 `cwd` 的驱动器盘符（Drive Letter）！**
-- 若宿主运行在 `C:\Users\...`，而动画渲染存放在 `D:\myprogram\...`：
-  - `resolve('C:\...', '/myprogram/.../out.gif')` 会解析为 `C:\myprogram\...`（直接触发 **404 Not Found**）！
+- 若宿主运行在 `C:\Users\...`，而动画渲染存放在 `D:\projects\...`：
+  - `resolve('C:\...', '/projects/.../out.gif')` 会解析为 `C:\projects\...`（直接触发 **404 Not Found**）！
 
 ### 官方标准解法
 `install.ps1` 会在 `~/.dsh/profiles/web/cordis.patch.yml` 中自动植入 `fs-sandbox` 覆盖配置，将文件系统的解析基准盘符锁定到与渲染根目录相同的盘符：
 ```yaml
 - id: fs-sandbox
   config:
-    cwd: 'D:/myprogram/dshplugin'
+    cwd: '<render_root_parent_dir>'
 ```
-只要 cwd 处于同一盘符，`/myprogram/...` 就能精准命中 `D:\myprogram\...`。
+只要 cwd 处于同一盘符，去掉盘符的绝对路径（如 `/projects/...`）就能被 `path.resolve` 正确映射。
 
 ---
 

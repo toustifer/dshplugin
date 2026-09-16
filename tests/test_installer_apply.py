@@ -24,7 +24,7 @@ PROFILE_PATCH = """\
 - id: connection
   config:
     trustedHosts:
-      - dsh.stifer.xyz
+      - example.com
 
 # agentflow MCP — per docs/dsh-setup.md
 - insert:
@@ -141,7 +141,7 @@ def test_apply_install_mounts_the_mcp_without_disturbing_other_entries(sandbox: 
     assert "serverName: manim" in text
     assert "# agentflow MCP — per docs/dsh-setup.md" in text
     assert "id: mcp-agentflow" in text
-    assert "dsh.stifer.xyz" in text
+    assert "example.com" in text
 
     import yaml
 

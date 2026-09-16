@@ -1,6 +1,6 @@
 # dsh-manim-gallery
 
-DSH 左侧栏的**「动画库」面板**：常驻回看 `manim-mcp` 渲染出的全部动画。它是 `D:\myprogram\dshplugin` 三个组件中的第二个（第一个是渲染引擎，第三个是 Skill 与安装器）。
+DSH 的**「动画库」面板**：常驻回看 `manim-mcp` 渲染出的全部动画。它是本仓库三个组件中的第二个（第一个是渲染引擎，第三个是 Skill 与安装器）。
 
 它**只读**：读 `manim-mcp` 写出的 `renders/index.json`，把每条记录渲染成一张卡片，点开用原生视频播放器看 MP4。它不改任何文件、不调用任何 MCP 工具。
 
@@ -93,7 +93,7 @@ const RENDER_ROOT = "D:/myprogram/dshplugin/renders";
 ## 测试
 
 ```powershell
-cd D:\myprogram\dshplugin\dsh-manim-gallery
+cd dsh-manim-gallery
 node --test "test/*.test.mjs"
 ```
 

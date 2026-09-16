@@ -19,7 +19,7 @@
     "stderrTail": "TypeError: Only values of type VMobject can be added as submobjects of VGroup..."
   },
   "hint": "检查第 86 行附近的对象类型...",
-  "codePath": "D:\\myprogram\\dshplugin\\renders\\...\\scene.py"
+  "codePath": "<render_root>\\...\\scene.py"
 }
 ```
 

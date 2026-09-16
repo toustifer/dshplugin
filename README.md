@@ -25,9 +25,9 @@
 
 | 引用形式 | `resolve` 结果 | |
 |---|---|---|
-| `/myprogram/dshplugin/renders/r1/out/S.gif` | `D:\myprogram\dshplugin\renders\r1\out\S.gif` | ✅ |
+| `/path/to/project/renders/r1/out/S.gif` | `D:\path\to\project\renders\r1\out\S.gif` | ✅ |
 | `/renders/r1/out/S.gif` | `D:\renders\r1\out\S.gif` | ❌ |
-| `/D:/myprogram/dshplugin/renders/r1/out/S.gif` | `D:\D:\myprogram\...` | ❌ |
+| `/D:/path/to/project/renders/r1/out/S.gif` | `D:\D:\path\to\project\...` | ❌ |
 
 所以引擎发出的是「**去掉盘符的完整绝对路径**」，而 `install.ps1` 唯一要做的就是让文件系统 provider 的 cwd 落在**与渲染产物同一个盘符**上——它把 `fs-sandbox.cwd` 钉到 `renders/` 的父目录，目录本身无关紧要，盘符才是关键。换盘符安装时会重新钉。
 
@@ -44,7 +44,7 @@ node tests/manual/probe_file_api.mjs
 ## 安装
 
 ```powershell
-cd D:\myprogram\dshplugin
+cd <path-to-dshplugin>
 
 .\install.ps1 -DryRun     # 先看它打算做什么。dry-run 不写任何文件。
 .\install.ps1             # 真正安装
