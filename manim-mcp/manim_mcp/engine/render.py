@@ -107,6 +107,7 @@ def render_scene(
     try:
         process = spawn(
             argv,
+            cwd=str(paths.root),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
