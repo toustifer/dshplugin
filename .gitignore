@@ -1,5 +1,11 @@
 # 渲染产物（可随时清空重建）
 renders/
+media/
+media_preview/
+_af-verify/
+
+# 测试生成文件
+*.pdf
 
 # Python
 __pycache__/
@@ -12,3 +18,4 @@ __pycache__/
 # 探针/临时
 .probe/
 .verify/
+
