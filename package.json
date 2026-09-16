@@ -1,0 +1,16 @@
+{
+  "name": "dshplugin",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness visual explainer and media suite: 3Blue1Brown Manim mathematical animations, native gallery drawer, and multi-modal inline file publishing.",
+  "type": "module",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "dsh-manim-gallery": "link:./dsh-manim-gallery",
+    "dsh-media-view": "link:./dsh-media-view"
+  },
+  "license": "MIT"
+}

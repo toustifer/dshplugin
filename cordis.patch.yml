@@ -1,0 +1,6 @@
+# Root composition patch for dshplugin suite
+- insert:
+    - id: dsh-manim-gallery
+      name: dsh-manim-gallery
+    - id: dsh-media-view
+      name: dsh-media-view
