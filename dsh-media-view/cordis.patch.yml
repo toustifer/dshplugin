@@ -1,2 +1,3 @@
-# 本插件不覆盖任何 composition 行；它只向槽位注册。空层让 bundle 声明成立。
-[]
+- insert:
+    - id: dsh-media-view
+      name: dsh-media-view
