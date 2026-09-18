@@ -43,6 +43,25 @@ node tests/manual/probe_file_api.mjs
 
 ## 安装
 
+### 方式一：DSH 插件市场 / npm 安装独立组件（推荐）
+
+本仓库的核心组件现已独立发布到 npm 官方注册表，支持在 DSH 桌面端或通过 CLI 独立受管安装：
+
+- **媒体视图渲染器 (`dsh-media-view`)**：
+  ```bash
+  dsh plugin --profile web add dsh-media-view
+  ```
+  在 `<dshHome>/profiles/web/cordis.patch.yml` 中追加：
+  ```yaml
+  - insert:
+      - id: media-view
+        name: 'dsh-media-view'
+  ```
+
+---
+
+### 方式二：全套全家桶源码一键安装（含 Manim 渲染引擎与本地面板）
+
 ```powershell
 cd <path-to-dshplugin>
 
